@@ -1,7 +1,16 @@
 // Fetch is available globally in React Native
 declare const fetch: typeof globalThis.fetch;
 
-const RAPID_API_KEY = 'ee94e4170emsh3c07b39892d6b2dp1690bejsn9d0ac546e0ae';
+import Constants from "expo-constants";
+
+// Read API key from Expo's app.config.js (populated from .env)
+const { rapidApiKey } = Constants.expoConfig?.extra ?? {};
+const RAPID_API_KEY = rapidApiKey;
+
+if (!RAPID_API_KEY) {
+  throw new Error('RAPID_API_KEY is not configured. Please check your .env file.');
+}
+
 const RAPID_API_HOST = 'exercisedb.p.rapidapi.com';
 const BASE_URL = 'https://exercisedb.p.rapidapi.com';
 
