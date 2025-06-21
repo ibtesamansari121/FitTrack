@@ -9,17 +9,20 @@ import {
   Alert,
   ActivityIndicator,
   TextInput,
+  Modal,
+  Image,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { CustomInput } from '../components/CustomInput';
-import { CustomButton } from '../components/CustomButton';
 import ExerciseCard from '../components/ExerciseCard';
 import { ExerciseService } from '../services/exerciseService';
 import { useRoutineStore } from '../store/routineStore';
 import { useAuthStore } from '../store/authStore';
 import { Exercise } from '../types/routine';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import GlobalStyles from '../styles/GlobalStyles';
 
 type CreateRoutineScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'CreateRoutine'>;
 
@@ -40,7 +43,9 @@ const BODY_PARTS = [
   'waist'
 ];
 
-const DAYS_OF_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const { width } = Dimensions.get('window');
 
 export default function CreateRoutineScreen({ navigation }: Props) {
   const [routineName, setRoutineName] = useState('');
@@ -51,6 +56,8 @@ export default function CreateRoutineScreen({ navigation }: Props) {
   const [selectedExercises, setSelectedExercises] = useState<Exercise[]>([]);
   const [isLoadingExercises, setIsLoadingExercises] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [selectedExerciseInfo, setSelectedExerciseInfo] = useState<any>(null);
+  const [showExerciseModal, setShowExerciseModal] = useState(false);
 
   const { user } = useAuthStore();
   const { createRoutine } = useRoutineStore();
@@ -99,16 +106,6 @@ export default function CreateRoutineScreen({ navigation }: Props) {
     }
   };
 
-  const updateExercise = (exerciseId: string, field: keyof Exercise, value: any) => {
-    setSelectedExercises(prev => 
-      prev.map(exercise => 
-        exercise.id === exerciseId 
-          ? { ...exercise, [field]: value }
-          : exercise
-      )
-    );
-  };
-
   const filteredExercises = exercises.filter(exercise =>
     exercise.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -121,6 +118,11 @@ export default function CreateRoutineScreen({ navigation }: Props) {
 
     if (selectedExercises.length === 0) {
       Alert.alert('Error', 'Please select at least one exercise.');
+      return;
+    }
+
+    if (selectedDays.length === 0) {
+      Alert.alert('Error', 'Please select at least one day for the routine.');
       return;
     }
 
@@ -138,6 +140,10 @@ export default function CreateRoutineScreen({ navigation }: Props) {
         return total + exerciseTime + restTime;
       }, 0);
 
+      // Convert selected days to numbers (0=Sunday, 1=Monday, etc.)
+      const dayMap = { 'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6 };
+      const scheduledDays = selectedDays.map(day => dayMap[day as keyof typeof dayMap]).filter(day => day !== undefined);
+
       const routine = {
         title: routineName.trim(),
         description: `Custom routine with ${selectedExercises.length} exercises`,
@@ -150,6 +156,7 @@ export default function CreateRoutineScreen({ navigation }: Props) {
         exercises: selectedExercises,
         userId: user.uid,
         isDefault: false,
+        scheduledDays: scheduledDays,
       };
 
       await createRoutine(routine);
@@ -171,8 +178,18 @@ export default function CreateRoutineScreen({ navigation }: Props) {
     }
   };
 
+  const showExerciseInfo = (exercise: any) => {
+    setSelectedExerciseInfo(exercise);
+    setShowExerciseModal(true);
+  };
+
+  const closeExerciseModal = () => {
+    setShowExerciseModal(false);
+    setSelectedExerciseInfo(null);
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { paddingTop: GlobalStyles.layout.topPadding }]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity 
@@ -274,8 +291,7 @@ export default function CreateRoutineScreen({ navigation }: Props) {
                 exercise={exercise}
                 isSelected={selectedExercises.some(e => e.id === exercise.id)}
                 onToggle={() => toggleExercise(exercise)}
-                selectedExercise={selectedExercises.find(e => e.id === exercise.id)}
-                onUpdateExercise={updateExercise}
+                onShowInfo={() => showExerciseInfo(exercise)}
               />
             ))
           )}
@@ -298,19 +314,96 @@ export default function CreateRoutineScreen({ navigation }: Props) {
           </View>
         )}
 
-        {/* Bottom spacing */}
+        {/* Bottom spacing for tab bar */}
         <View style={styles.bottomSpacing} />
       </ScrollView>
 
-      {/* Save Button */}
-      <View style={styles.saveButtonContainer}>
-        <CustomButton
-          title="Save"
+      {/* Create Button */}
+      <View style={styles.createButtonContainer}>
+        <TouchableOpacity
+          style={[
+            styles.createButton,
+            (!routineName.trim() || selectedExercises.length === 0 || selectedDays.length === 0) && styles.createButtonDisabled
+          ]}
           onPress={handleCreateRoutine}
-          loading={isCreating}
-          disabled={!routineName.trim() || selectedExercises.length === 0}
-        />
+          disabled={isCreating || !routineName.trim() || selectedExercises.length === 0 || selectedDays.length === 0}
+        >
+          {isCreating ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={[
+              styles.createButtonText,
+              (!routineName.trim() || selectedExercises.length === 0 || selectedDays.length === 0) && styles.createButtonTextDisabled
+            ]}>
+              Create Routine
+            </Text>
+          )}
+        </TouchableOpacity>
       </View>
+      
+      {/* Exercise Info Modal */}
+      <Modal
+        visible={showExerciseModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={closeExerciseModal}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={closeExerciseModal}>
+              <Ionicons name="close" size={24} color="#1A1A1A" />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Exercise Info</Text>
+            <View style={{ width: 24 }} />
+          </View>
+          
+          {selectedExerciseInfo && (
+            <ScrollView style={styles.modalContent}>
+              <Image 
+                source={{ uri: selectedExerciseInfo.gifUrl || 'https://via.placeholder.com/400x300?text=Exercise' }}
+                style={styles.exerciseGif}
+                resizeMode="contain"
+              />
+              
+              <View style={styles.modalDetails}>
+                <Text style={styles.exerciseName}>{selectedExerciseInfo.name}</Text>
+                
+                <View style={styles.badgeRow}>
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{selectedExerciseInfo.bodyPart}</Text>
+                  </View>
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{selectedExerciseInfo.target}</Text>
+                  </View>
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{selectedExerciseInfo.equipment}</Text>
+                  </View>
+                </View>
+                
+                {selectedExerciseInfo.instructions && selectedExerciseInfo.instructions.length > 0 && (
+                  <>
+                    <Text style={styles.modalSectionTitle}>Instructions</Text>
+                    {selectedExerciseInfo.instructions.map((instruction: string, index: number) => (
+                      <Text key={index} style={styles.instructionText}>
+                        {index + 1}. {instruction}
+                      </Text>
+                    ))}
+                  </>
+                )}
+                
+                {selectedExerciseInfo.secondaryMuscles && selectedExerciseInfo.secondaryMuscles.length > 0 && (
+                  <>
+                    <Text style={styles.modalSectionTitle}>Secondary Muscles</Text>
+                    <Text style={styles.detailText}>
+                      {selectedExerciseInfo.secondaryMuscles.join(', ')}
+                    </Text>
+                  </>
+                )}
+              </View>
+            </ScrollView>
+          )}
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -447,9 +540,105 @@ const styles = StyleSheet.create({
   bottomSpacing: {
     height: 20,
   },
-  saveButtonContainer: {
+  // Modal styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#1A1A1A',
+  },
+  modalContent: {
+    flex: 1,
+  },
+  exerciseGif: {
+    width: width,
+    height: 250,
+    backgroundColor: '#F5F5F5',
+  },
+  modalDetails: {
+    padding: 24,
+  },
+  exerciseName: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    marginBottom: 16,
+    textTransform: 'capitalize',
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 24,
+  },
+  badge: {
+    backgroundColor: '#F0F0F0',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  badgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    textTransform: 'capitalize',
+  },
+  modalSectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginBottom: 12,
+    marginTop: 16,
+  },
+  instructionText: {
+    fontSize: 14,
+    color: '#666666',
+    lineHeight: 22,
+    marginBottom: 8,
+  },
+  detailText: {
+    fontSize: 14,
+    color: '#666666',
+    lineHeight: 20,
+    textTransform: 'capitalize',
+  },
+  createButtonContainer: {
     padding: 16,
+    paddingBottom: 32,
+    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#F0F0F0',
+  },
+  createButton: {
+    backgroundColor: '#2196F3',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+  },
+  createButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  createButtonDisabled: {
+    backgroundColor: '#E0E0E0',
+  },
+  createButtonTextDisabled: {
+    color: '#8B9CB5',
   },
 });

@@ -19,6 +19,7 @@ import { useAuthStore } from '../store/authStore';
 import { useWorkoutStore } from '../store/workoutStore';
 import { Exercise } from '../types/routine';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import GlobalStyles from '../styles/GlobalStyles';
 
 type StartWorkoutScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'StartWorkout'>;
 type StartWorkoutScreenRouteProp = RouteProp<RootStackParamList, 'StartWorkout'>;
@@ -348,7 +349,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: GlobalStyles.layout.topPadding,
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',

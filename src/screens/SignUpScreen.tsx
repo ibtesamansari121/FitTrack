@@ -16,6 +16,7 @@ import { CustomInput } from '../components/CustomInput';
 import { CustomButton } from '../components/CustomButton';
 import { AuthService } from '../services/authService';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import GlobalStyles from '../styles/GlobalStyles';
 
 type SignUpScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'SignUp'>;
 
@@ -137,7 +138,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 24,
-    paddingTop: 40,
+    paddingTop: GlobalStyles.layout.topPadding,
     paddingBottom: 20,
   },
   formContainer: {

@@ -24,6 +24,7 @@ export interface Routine {
   updatedAt: Date;
   userId?: string; // For user-created routines
   isDefault?: boolean; // For app-provided routines
+  scheduledDays?: number[]; // 0=Sunday, 1=Monday, ..., 6=Saturday
 }
 
 export interface RoutineStats {

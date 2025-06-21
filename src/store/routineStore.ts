@@ -15,7 +15,6 @@ interface RoutineState {
   createRoutine: (routine: Omit<Routine, 'id' | 'createdAt' | 'updatedAt'>) => Promise<string>;
   updateRoutine: (routineId: string, updates: Partial<Routine>) => Promise<void>;
   deleteRoutine: (routineId: string) => Promise<void>;
-  initializeDefaultRoutines: () => Promise<void>;
   setError: (error: string | null) => void;
   clearError: () => void;
 }
@@ -137,20 +136,6 @@ export const useRoutineStore = create<RoutineState>((set, get) => ({
         isLoading: false 
       });
       throw error;
-    }
-  },
-
-  // Initialize default routines
-  initializeDefaultRoutines: async () => {
-    set({ isLoading: true, error: null });
-    try {
-      await RoutineService.initializeDefaultRoutines();
-      await get().loadDefaultRoutines();
-    } catch (error) {
-      set({ 
-        error: error instanceof Error ? error.message : 'Failed to initialize default routines',
-        isLoading: false 
-      });
     }
   },
 

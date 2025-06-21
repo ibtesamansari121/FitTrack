@@ -19,6 +19,7 @@ import { Routine } from '../types/routine';
 import { useRoutineStore } from '../store/routineStore';
 import { useAuthStore } from '../store/authStore';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import GlobalStyles from '../styles/GlobalStyles';
 
 type RoutinesScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -35,7 +36,6 @@ export default function RoutinesScreen() {
     error,
     loadUserRoutines,
     loadDefaultRoutines,
-    initializeDefaultRoutines,
     clearError,
   } = useRoutineStore();
 
@@ -52,13 +52,8 @@ export default function RoutinesScreen() {
   useEffect(() => {
     const loadRoutines = async () => {
       try {
-        // Load default routines first
+        // Load default routines (will be empty now)
         await loadDefaultRoutines();
-        
-        // Initialize defaults if none exist
-        if (defaultRoutines.length === 0) {
-          await initializeDefaultRoutines();
-        }
         
         // Load user routines if user is logged in
         if (user?.uid) {
@@ -70,7 +65,7 @@ export default function RoutinesScreen() {
     };
 
     loadRoutines();
-  }, [user, loadDefaultRoutines, loadUserRoutines, initializeDefaultRoutines, defaultRoutines.length]);
+  }, [user, loadDefaultRoutines, loadUserRoutines]);
 
   // Handle pull to refresh
   const onRefresh = async () => {
@@ -282,7 +277,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 24,
-    paddingTop: 20,
+    paddingTop: GlobalStyles.layout.topPadding,
     paddingBottom: 24,
   },
   title: {

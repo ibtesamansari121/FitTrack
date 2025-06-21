@@ -90,6 +90,164 @@ export class WorkoutService {
     })) as WorkoutSession[];
   }
 
+  // Get workout consistency for the current week
+  static async getWeeklyConsistency(userId: string): Promise<{ completed: number; total: number }> {
+    try {
+      const workouts = await this.getUserWorkouts(userId);
+      
+      // Get the start of this week (Monday)
+      const now = new Date();
+      const startOfWeek = new Date(now);
+      const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is Sunday
+      startOfWeek.setDate(diff);
+      startOfWeek.setHours(0, 0, 0, 0);
+
+      // Filter workouts from this week that are completed
+      const thisWeekWorkouts = workouts.filter(workout => 
+        workout.completedAt && 
+        workout.completedAt >= startOfWeek
+      );
+
+      // Get unique days (in case user did multiple workouts in one day)
+      const uniqueDays = new Set(
+        thisWeekWorkouts.map(workout => 
+          workout.completedAt ? workout.completedAt.toDateString() : ''
+        ).filter(Boolean)
+      );
+
+      return {
+        completed: uniqueDays.size,
+        total: 7 // target: workout every day of the week
+      };
+    } catch (error) {
+      return { completed: 0, total: 7 };
+    }
+  }
+
+  // Get exercise progress with weight tracking
+  static async getExerciseStats(userId: string): Promise<{ exerciseId: string; exerciseName: string; currentWeight: number; change: number; chartData: number[] }[]> {
+    try {
+      const workouts = await this.getUserWorkouts(userId);
+      const exerciseMap = new Map<string, { name: string; weights: { date: Date; weight: number }[] }>();
+
+      // Process all workouts to extract exercise weights
+      workouts.forEach(workout => {
+        if (workout.completedAt && workout.exercises) {
+          workout.exercises.forEach(exercise => {
+            if (!exerciseMap.has(exercise.exerciseId)) {
+              exerciseMap.set(exercise.exerciseId, {
+                name: exercise.exerciseName,
+                weights: []
+              });
+            }
+
+            // Add weight data if available
+            exercise.sets.forEach(set => {
+              if (set.weight && set.completed) {
+                exerciseMap.get(exercise.exerciseId)!.weights.push({
+                  date: workout.completedAt!,
+                  weight: set.weight
+                });
+              }
+            });
+          });
+        }
+      });
+
+      // Process exercise data to create stats
+      const exerciseStats: { exerciseId: string; exerciseName: string; currentWeight: number; change: number; chartData: number[] }[] = [];
+
+      exerciseMap.forEach((data, exerciseId) => {
+        if (data.weights.length > 0) {
+          // Sort by date
+          data.weights.sort((a, b) => a.date.getTime() - b.date.getTime());
+          
+          // Get last 7 data points for chart
+          const recentWeights = data.weights.slice(-7);
+          const chartData = recentWeights.map(w => w.weight);
+          
+          // Calculate change percentage
+          const currentWeight = recentWeights[recentWeights.length - 1].weight;
+          const previousWeight = recentWeights.length > 1 ? recentWeights[0].weight : currentWeight;
+          const change = previousWeight > 0 ? ((currentWeight - previousWeight) / previousWeight) * 100 : 0;
+
+          exerciseStats.push({
+            exerciseId,
+            exerciseName: data.name,
+            currentWeight,
+            change: Math.round(change),
+            chartData
+          });
+        }
+      });
+
+      return exerciseStats;
+    } catch (error) {
+      return [];
+    }
+  }
+
+  // Get routine summary statistics
+  static async getRoutineSummary(userId: string): Promise<{ thisWeek: number; thisMonth: number; streak: number }> {
+    try {
+      const workouts = await this.getUserWorkouts(userId);
+      const completedWorkouts = workouts.filter(w => w.completedAt);
+
+      // This week count
+      const now = new Date();
+      const startOfWeek = new Date(now);
+      const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+      startOfWeek.setDate(diff);
+      startOfWeek.setHours(0, 0, 0, 0);
+
+      const thisWeekCount = completedWorkouts.filter(w => 
+        w.completedAt! >= startOfWeek
+      ).length;
+
+      // This month count
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const thisMonthCount = completedWorkouts.filter(w => 
+        w.completedAt! >= startOfMonth
+      ).length;
+
+      // Calculate streak (consecutive weeks with at least one workout)
+      let streak = 0;
+      const weeklyWorkouts = new Map<string, boolean>();
+      
+      completedWorkouts.forEach(workout => {
+        const date = workout.completedAt!;
+        const weekStart = new Date(date);
+        const dayOfWeek = date.getDay();
+        const diffToMonday = date.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+        weekStart.setDate(diffToMonday);
+        const weekKey = weekStart.toISOString().split('T')[0];
+        weeklyWorkouts.set(weekKey, true);
+      });
+
+      // Count consecutive weeks from current week backwards
+      let currentWeekStart = new Date(startOfWeek);
+      while (true) {
+        const weekKey = currentWeekStart.toISOString().split('T')[0];
+        if (weeklyWorkouts.has(weekKey)) {
+          streak++;
+          currentWeekStart.setDate(currentWeekStart.getDate() - 7);
+        } else {
+          break;
+        }
+      }
+
+      return {
+        thisWeek: thisWeekCount,
+        thisMonth: thisMonthCount,
+        streak
+      };
+    } catch (error) {
+      return { thisWeek: 0, thisMonth: 0, streak: 0 };
+    }
+  }
+
   // Get exercise progress for a specific exercise
   static async getExerciseProgress(userId: string, exerciseId: string): Promise<ExerciseProgress | null> {
     const q = query(

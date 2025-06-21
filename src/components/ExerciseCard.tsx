@@ -5,50 +5,26 @@ import {
   Image, 
   StyleSheet, 
   TouchableOpacity, 
-  TextInput,
   Modal,
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ExerciseAPIResponse } from '../services/exerciseService';
-import { Exercise } from '../types/routine';
 
 interface ExerciseCardProps {
   exercise: ExerciseAPIResponse;
   isSelected: boolean;
   onToggle: () => void;
-  selectedExercise?: Exercise;
-  onUpdateExercise?: (exerciseId: string, field: keyof Exercise, value: any) => void;
+  onShowInfo?: () => void;
 }
 
 const ExerciseCard: React.FC<ExerciseCardProps> = ({
   exercise,
   isSelected,
   onToggle,
-  selectedExercise,
-  onUpdateExercise,
+  onShowInfo,
 }) => {
   const [showDetails, setShowDetails] = useState(false);
-
-  const handleSetsChange = (value: string) => {
-    const sets = parseInt(value) || 1;
-    onUpdateExercise?.(exercise.id, 'sets', Math.max(1, sets));
-  };
-
-  const handleRepsChange = (value: string) => {
-    // Allow both number and string (for time-based exercises)
-    if (value.includes('sec') || value.includes('min')) {
-      onUpdateExercise?.(exercise.id, 'reps', value);
-    } else {
-      const reps = parseInt(value) || 1;
-      onUpdateExercise?.(exercise.id, 'reps', Math.max(1, reps));
-    }
-  };
-
-  const handleRestTimeChange = (value: string) => {
-    const restTime = parseInt(value) || 30;
-    onUpdateExercise?.(exercise.id, 'restTime', Math.max(15, restTime));
-  };
 
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
@@ -86,9 +62,6 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({
             <Text style={styles.exerciseName} numberOfLines={2}>
               {exercise.name}
             </Text>
-            <TouchableOpacity onPress={() => setShowDetails(true)}>
-              <Ionicons name="information-circle-outline" size={20} color="#8B9CB5" />
-            </TouchableOpacity>
           </View>
           
           <Text style={styles.bodyPart}>
@@ -98,52 +71,21 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({
           <Text style={styles.equipment}>
             {exercise.equipment}
           </Text>
-          
-          {isSelected && (
-            <View style={styles.exerciseControls}>
-              <View style={styles.controlRow}>
-                <View style={styles.controlItem}>
-                  <Text style={styles.controlLabel}>Sets</Text>
-                  <TextInput
-                    style={styles.controlInput}
-                    value={selectedExercise?.sets.toString() || '3'}
-                    onChangeText={handleSetsChange}
-                    keyboardType="numeric"
-                    selectTextOnFocus
-                  />
-                </View>
-                
-                <View style={styles.controlItem}>
-                  <Text style={styles.controlLabel}>Reps</Text>
-                  <TextInput
-                    style={styles.controlInput}
-                    value={selectedExercise?.reps.toString() || '12'}
-                    onChangeText={handleRepsChange}
-                    selectTextOnFocus
-                  />
-                </View>
-                
-                <View style={styles.controlItem}>
-                  <Text style={styles.controlLabel}>Rest (sec)</Text>
-                  <TextInput
-                    style={styles.controlInput}
-                    value={selectedExercise?.restTime?.toString() || '60'}
-                    onChangeText={handleRestTimeChange}
-                    keyboardType="numeric"
-                    selectTextOnFocus
-                  />
-                </View>
-              </View>
-            </View>
-          )}
         </View>
         
-        <View style={styles.checkbox}>
-          <Ionicons 
-            name={isSelected ? "checkmark-circle" : "ellipse-outline"} 
-            size={24} 
-            color={isSelected ? "#2196F3" : "#D0D0D0"} 
-          />
+        <View style={styles.cardActions}>
+          {onShowInfo && (
+            <TouchableOpacity style={styles.infoButton} onPress={onShowInfo}>
+              <Ionicons name="information-circle-outline" size={20} color="#2196F3" />
+            </TouchableOpacity>
+          )}
+          <View style={styles.checkbox}>
+            <Ionicons 
+              name={isSelected ? "checkmark-circle" : "ellipse-outline"} 
+              size={24} 
+              color={isSelected ? "#2196F3" : "#D0D0D0"} 
+            />
+          </View>
         </View>
       </TouchableOpacity>
 
@@ -321,8 +263,18 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
   },
   checkbox: {
-    alignSelf: 'flex-start',
-    marginTop: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingTop: 8,
+  },
+  infoButton: {
+    padding: 4,
+    marginRight: 8,
   },
   modalContainer: {
     flex: 1,
