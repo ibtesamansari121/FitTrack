@@ -8,12 +8,16 @@ interface AuthState {
     displayName?: string | null;
     photoURL?: string | null;
   };
+  isLoading: boolean;
   setUser: (user: AuthState["user"]) => void;
+  setLoading: (loading: boolean) => void;
   logout: () => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  setUser: (user) => set({ user }),
-  logout: () => set({ user: null }),
+  isLoading: true, // Start with loading state
+  setUser: (user) => set({ user, isLoading: false }),
+  setLoading: (loading) => set({ isLoading: loading }),
+  logout: () => set({ user: null, isLoading: false }),
 }));

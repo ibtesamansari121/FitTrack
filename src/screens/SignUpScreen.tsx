@@ -15,12 +15,7 @@ import { AuthHeader } from '../components/AuthHeader';
 import { CustomInput } from '../components/CustomInput';
 import { CustomButton } from '../components/CustomButton';
 import { AuthService } from '../services/authService';
-
-type RootStackParamList = {
-  Login: undefined;
-  SignUp: undefined;
-  Home: undefined;
-};
+import { RootStackParamList } from '../navigation/AppNavigator';
 
 type SignUpScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'SignUp'>;
 
