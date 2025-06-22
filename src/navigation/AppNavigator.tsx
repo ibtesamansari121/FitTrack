@@ -13,7 +13,7 @@ export type RootStackParamList = {
   Main: undefined;
   Login: undefined;
   SignUp: undefined;
-  CreateRoutine: undefined;
+  CreateRoutine: { routine?: any } | undefined; // Optional routine for editing
   StartWorkout: { routine: any }; // We'll type this properly later
 };
 

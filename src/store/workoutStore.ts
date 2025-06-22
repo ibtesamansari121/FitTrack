@@ -6,13 +6,18 @@ interface WorkoutStore {
   currentWorkout: WorkoutSession | null;
   workoutHistory: WorkoutSession[];
   exerciseProgress: Record<string, ExerciseProgress>;
+  weeklyConsistency: { completed: number; total: number };
+  routineSummary: { thisWeek: number; thisMonth: number; streak: number };
   isLoading: boolean;
   error: string | null;
 
   // Actions
   startWorkout: (routineId: string, routineName: string, userId: string, exercises: any[]) => Promise<string>;
-  completeWorkout: (workoutId: string, duration: number) => Promise<void>;
+  logExercise: (workoutId: string, exerciseId: string, reps: number, weight: number) => Promise<void>;
+  completeWorkout: (workoutId: string, duration: number, userId: string) => Promise<void>;
   loadWorkoutHistory: (userId: string) => Promise<void>;
+  loadWeeklyConsistency: (userId: string) => Promise<void>;
+  loadRoutineSummary: (userId: string) => Promise<void>;
   loadExerciseProgress: (userId: string, exerciseId: string) => Promise<void>;
   clearError: () => void;
   reset: () => void;
@@ -22,6 +27,8 @@ const initialState = {
   currentWorkout: null,
   workoutHistory: [],
   exerciseProgress: {},
+  weeklyConsistency: { completed: 0, total: 7 },
+  routineSummary: { thisWeek: 0, thisMonth: 0, streak: 0 },
   isLoading: false,
   error: null,
 };
@@ -43,11 +50,34 @@ export const useWorkoutStore = create<WorkoutStore>((set) => ({
     }
   },
 
-  completeWorkout: async (workoutId: string, duration: number) => {
+  logExercise: async (workoutId: string, exerciseId: string, reps: number, weight: number) => {
+    set({ isLoading: true, error: null });
+    try {
+      await WorkoutService.logExercise(workoutId, exerciseId, reps, weight);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to log exercise';
+      set({ error: errorMessage });
+      throw error;
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  completeWorkout: async (workoutId: string, duration: number, userId: string) => {
     set({ isLoading: true, error: null });
     try {
       await WorkoutService.completeWorkout(workoutId, duration);
-      // Optionally update local state
+      
+      // Update weekly consistency and routine summary after completing workout
+      const [consistency, summary] = await Promise.all([
+        WorkoutService.getWeeklyConsistency(userId),
+        WorkoutService.getRoutineSummary(userId)
+      ]);
+      
+      set({ 
+        weeklyConsistency: consistency,
+        routineSummary: summary 
+      });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to complete workout';
       set({ error: errorMessage });
@@ -70,6 +100,19 @@ export const useWorkoutStore = create<WorkoutStore>((set) => ({
     }
   },
 
+  loadWeeklyConsistency: async (userId: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const consistency = await WorkoutService.getWeeklyConsistency(userId);
+      set({ weeklyConsistency: consistency });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load weekly consistency';
+      set({ error: errorMessage });
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
   loadExerciseProgress: async (userId: string, exerciseId: string) => {
     set({ isLoading: true, error: null });
     try {
@@ -84,6 +127,19 @@ export const useWorkoutStore = create<WorkoutStore>((set) => ({
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to load exercise progress';
+      set({ error: errorMessage });
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  loadRoutineSummary: async (userId: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const summary = await WorkoutService.getRoutineSummary(userId);
+      set({ routineSummary: summary });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load routine summary';
       set({ error: errorMessage });
     } finally {
       set({ isLoading: false });

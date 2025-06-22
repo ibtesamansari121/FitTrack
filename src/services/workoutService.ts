@@ -4,9 +4,11 @@ import {
   addDoc,
   updateDoc,
   getDocs,
+  getDoc,
   query,
   where,
   Timestamp,
+  arrayUnion,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { WorkoutSession, ExerciseProgress } from '../types/routine';
@@ -30,12 +32,9 @@ export class WorkoutService {
       exercises: exercises.map(exercise => ({
         exerciseId: exercise.id,
         exerciseName: exercise.name,
-        sets: Array.from({ length: exercise.sets }, () => ({
-          reps: 0,
-          weight: 0,
-          completed: false,
-        })),
-        completedAt: null,
+        reps: 0,
+        weight: 0,
+        completed: false,
       })),
     };
 
@@ -43,26 +42,55 @@ export class WorkoutService {
     return docRef.id;
   }
 
-  // Update workout progress
-  static async updateWorkoutProgress(
+  // Update workout progress - log exercise completion
+  static async logExercise(
     workoutId: string,
     exerciseId: string,
-    setIndex: number,
     reps: number,
-    weight?: number
+    weight: number
   ): Promise<void> {
-    const docRef = doc(db, WORKOUTS_COLLECTION, workoutId);
-    
-    // This is a simplified update - in practice, you'd need to read the document first,
-    // update the specific exercise set, and then save it back
-    await updateDoc(docRef, {
-      [`exercises.${exerciseId}.sets.${setIndex}`]: {
+    try {
+      const workoutDocRef = doc(db, WORKOUTS_COLLECTION, workoutId);
+      const workoutDoc = await getDoc(workoutDocRef);
+      
+      if (!workoutDoc.exists()) {
+        throw new Error('Workout not found');
+      }
+      
+      const workoutData = workoutDoc.data();
+      const exercises = workoutData.exercises || [];
+      
+      // Find and update the specific exercise
+      const updatedExercises = exercises.map((exercise: any) => {
+        if (exercise.exerciseId === exerciseId) {
+          return {
+            ...exercise,
+            reps,
+            weight,
+            completed: true,
+            completedAt: Timestamp.now(),
+          };
+        }
+        return exercise;
+      });
+
+      // Update the workout document
+      await updateDoc(workoutDocRef, {
+        exercises: updatedExercises,
+        updatedAt: Timestamp.now(),
+      });
+
+      // Also save to exercise progress collection for analytics
+      await this.saveExerciseProgress(
+        workoutData.userId,
+        exerciseId,
+        exercises.find((ex: any) => ex.exerciseId === exerciseId)?.exerciseName || '',
         reps,
-        weight: weight || 0,
-        completed: true,
-      },
-      updatedAt: Timestamp.now(),
-    });
+        weight
+      );
+    } catch (error) {
+      throw new Error(`Failed to log exercise: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   // Complete workout session
@@ -125,14 +153,40 @@ export class WorkoutService {
     }
   }
 
-  // Get exercise progress with weight tracking
-  static async getExerciseStats(userId: string): Promise<{ exerciseId: string; exerciseName: string; currentWeight: number; change: number; chartData: number[] }[]> {
+  // Get exercise progress with weight tracking for specific period
+  static async getExerciseStats(userId: string, period: 'week' | 'month' = 'week', selectedMonth?: string): Promise<{ exerciseId: string; exerciseName: string; currentWeight: number; change: number; chartData: number[] }[]> {
     try {
       const workouts = await this.getUserWorkouts(userId);
       const exerciseMap = new Map<string, { name: string; weights: { date: Date; weight: number }[] }>();
 
-      // Process all workouts to extract exercise weights
-      workouts.forEach(workout => {
+      // Calculate date range based on period
+      const now = new Date();
+      let startDate = new Date();
+      let endDate = new Date();
+      
+      if (period === 'week') {
+        startDate.setDate(now.getDate() - 7);
+        endDate = now;
+      } else if (period === 'month') {
+        if (selectedMonth) {
+          const [year, month] = selectedMonth.split('-').map(Number);
+          startDate = new Date(year, month - 1, 1);
+          endDate = new Date(year, month, 0); // Last day of the month
+        } else {
+          startDate.setDate(now.getDate() - 30);
+          endDate = now;
+        }
+      }
+
+      // Filter workouts within the period
+      const filteredWorkouts = workouts.filter(workout => 
+        workout.completedAt && 
+        workout.completedAt >= startDate && 
+        workout.completedAt <= endDate
+      );
+
+      // Process filtered workouts to extract exercise weights
+      filteredWorkouts.forEach(workout => {
         if (workout.completedAt && workout.exercises) {
           workout.exercises.forEach(exercise => {
             if (!exerciseMap.has(exercise.exerciseId)) {
@@ -142,15 +196,13 @@ export class WorkoutService {
               });
             }
 
-            // Add weight data if available
-            exercise.sets.forEach(set => {
-              if (set.weight && set.completed) {
-                exerciseMap.get(exercise.exerciseId)!.weights.push({
-                  date: workout.completedAt!,
-                  weight: set.weight
-                });
-              }
-            });
+            // Add weight data if exercise is completed
+            if (exercise.weight && exercise.completed) {
+              exerciseMap.get(exercise.exerciseId)!.weights.push({
+                date: workout.completedAt!,
+                weight: exercise.weight
+              });
+            }
           });
         }
       });
@@ -163,22 +215,25 @@ export class WorkoutService {
           // Sort by date
           data.weights.sort((a, b) => a.date.getTime() - b.date.getTime());
           
-          // Get last 7 data points for chart
-          const recentWeights = data.weights.slice(-7);
-          const chartData = recentWeights.map(w => w.weight);
+          // Filter out zero values and create chart data
+          const validWeights = data.weights.filter(w => w.weight > 0);
+          const chartData = validWeights.map(w => w.weight);
           
-          // Calculate change percentage
-          const currentWeight = recentWeights[recentWeights.length - 1].weight;
-          const previousWeight = recentWeights.length > 1 ? recentWeights[0].weight : currentWeight;
-          const change = previousWeight > 0 ? ((currentWeight - previousWeight) / previousWeight) * 100 : 0;
+          // Only include if we have valid data
+          if (chartData.length > 0) {
+            // Calculate change percentage
+            const currentWeight = chartData[chartData.length - 1];
+            const previousWeight = chartData.length > 1 ? chartData[0] : currentWeight;
+            const change = previousWeight > 0 ? ((currentWeight - previousWeight) / previousWeight) * 100 : 0;
 
-          exerciseStats.push({
-            exerciseId,
-            exerciseName: data.name,
-            currentWeight,
-            change: Math.round(change),
-            chartData
-          });
+            exerciseStats.push({
+              exerciseId,
+              exerciseName: data.name,
+              currentWeight,
+              change: Math.round(change),
+              chartData
+            });
+          }
         }
       });
 
@@ -216,23 +271,28 @@ export class WorkoutService {
       let streak = 0;
       const weeklyWorkouts = new Map<string, boolean>();
       
+      // Group workouts by week (using Monday as start of week)
       completedWorkouts.forEach(workout => {
-        const date = workout.completedAt!;
-        const weekStart = new Date(date);
+        const date = new Date(workout.completedAt!);
+        const mondayOfWeek = new Date(date);
         const dayOfWeek = date.getDay();
-        const diffToMonday = date.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-        weekStart.setDate(diffToMonday);
-        const weekKey = weekStart.toISOString().split('T')[0];
+        const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // Sunday = 0, Monday = 1
+        mondayOfWeek.setDate(date.getDate() + daysToMonday);
+        mondayOfWeek.setHours(0, 0, 0, 0);
+        const weekKey = mondayOfWeek.toISOString().split('T')[0];
         weeklyWorkouts.set(weekKey, true);
       });
 
       // Count consecutive weeks from current week backwards
-      let currentWeekStart = new Date(startOfWeek);
+      let currentMondayStart = new Date(startOfWeek);
+      currentMondayStart.setHours(0, 0, 0, 0);
+      
       while (true) {
-        const weekKey = currentWeekStart.toISOString().split('T')[0];
+        const weekKey = currentMondayStart.toISOString().split('T')[0];
         if (weeklyWorkouts.has(weekKey)) {
           streak++;
-          currentWeekStart.setDate(currentWeekStart.getDate() - 7);
+          // Go to previous week
+          currentMondayStart.setDate(currentMondayStart.getDate() - 7);
         } else {
           break;
         }
@@ -274,21 +334,46 @@ export class WorkoutService {
     userId: string,
     exerciseId: string,
     exerciseName: string,
-    sets: any[]
+    reps: number,
+    weight: number
   ): Promise<void> {
-    const progressData = {
-      exerciseId,
-      exerciseName,
-      userId,
-      lastUpdated: Timestamp.now(),
-      sessions: [{
+    try {
+      // Check if progress document already exists for this user and exercise
+      const q = query(
+        collection(db, EXERCISE_PROGRESS_COLLECTION),
+        where('userId', '==', userId),
+        where('exerciseId', '==', exerciseId)
+      );
+      
+      const snapshot = await getDocs(q);
+      
+      const newSession = {
         date: Timestamp.now(),
-        sets,
-      }],
-    };
+        reps,
+        weight,
+      };
 
-    // In a real implementation, you'd want to append to existing sessions
-    // rather than replace them
-    await addDoc(collection(db, EXERCISE_PROGRESS_COLLECTION), progressData);
+      if (snapshot.empty) {
+        // Create new progress document
+        const progressData = {
+          exerciseId,
+          exerciseName,
+          userId,
+          lastUpdated: Timestamp.now(),
+          sessions: [newSession],
+        };
+        await addDoc(collection(db, EXERCISE_PROGRESS_COLLECTION), progressData);
+      } else {
+        // Update existing progress document
+        const docRef = doc(db, EXERCISE_PROGRESS_COLLECTION, snapshot.docs[0].id);
+        await updateDoc(docRef, {
+          lastUpdated: Timestamp.now(),
+          sessions: arrayUnion(newSession),
+        });
+      }
+    } catch (error) {
+      // Silently fail to avoid breaking workout flow
+      // In production, you might want to log this to a monitoring service
+    }
   }
 }

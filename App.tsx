@@ -1,6 +1,7 @@
 // App.tsx
 import React, { useEffect } from "react";
 import { View, ActivityIndicator, StyleSheet } from "react-native";
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { onAuthStateChanged } from "firebase/auth";
 import AppNavigator from "./src/navigation/AppNavigator";
 import { auth } from "./src/lib/firebase";
@@ -35,7 +36,11 @@ export default function App() {
     );
   }
 
-  return <AppNavigator />;
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AppNavigator />
+    </GestureHandlerRootView>
+  );
 }
 
 const styles = StyleSheet.create({

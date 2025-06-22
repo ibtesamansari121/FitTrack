@@ -9,12 +9,15 @@ import {
   Alert,
   ActivityIndicator,
   RefreshControl,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SearchBar } from '../components/SearchBar';
 import { RoutineCard } from '../components/RoutineCard';
+import { SwipeableRoutineCard } from '../components/SwipeableRoutineCard';
 import { Routine } from '../types/routine';
 import { useRoutineStore } from '../store/routineStore';
 import { useAuthStore } from '../store/authStore';
@@ -26,6 +29,10 @@ type RoutinesScreenNavigationProp = NativeStackNavigationProp<RootStackParamList
 export default function RoutinesScreen() {
   const [searchText, setSearchText] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedRoutine, setSelectedRoutine] = useState<Routine | null>(null);
+  const [showWorkoutModal, setShowWorkoutModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [routineToDelete, setRoutineToDelete] = useState<Routine | null>(null);
   
   const navigation = useNavigation<RoutinesScreenNavigationProp>();
   const { user } = useAuthStore();
@@ -36,6 +43,7 @@ export default function RoutinesScreen() {
     error,
     loadUserRoutines,
     loadDefaultRoutines,
+    deleteRoutine,
     clearError,
   } = useRoutineStore();
 
@@ -83,28 +91,46 @@ export default function RoutinesScreen() {
   };
 
   const handleRoutinePress = (routine: Routine) => {
-    const difficultyEmoji = routine.difficulty === 'beginner' ? '🟢' : 
-                           routine.difficulty === 'intermediate' ? '🟡' : '🔴';
-    
-    const categoryEmoji = routine.category === 'strength' ? '💪' : 
-                         routine.category === 'cardio' ? '❤️' : 
-                         routine.category === 'flexibility' ? '🧘' : '🏃';
-    
-    Alert.alert(
-      `${categoryEmoji} ${routine.title}`,
-      `${routine.description || 'Get ready for an amazing workout!'}\n\n` +
-      `📊 ${routine.exerciseCount} exercises\n` +
-      `⏱️ ${routine.duration} minutes\n` +
-      `${difficultyEmoji} ${routine.difficulty.charAt(0).toUpperCase() + routine.difficulty.slice(1)}\n\n` +
-      `💡 Ready to start your workout?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Start Workout', 
-          onPress: () => navigation.navigate('StartWorkout', { routine })
-        }
-      ]
-    );
+    setSelectedRoutine(routine);
+    setShowWorkoutModal(true);
+  };
+
+  const handleStartWorkout = () => {
+    if (selectedRoutine) {
+      setShowWorkoutModal(false);
+      navigation.navigate('StartWorkout', { routine: selectedRoutine });
+    }
+  };
+
+  const handleCloseModal = () => {
+    setShowWorkoutModal(false);
+    setSelectedRoutine(null);
+  };
+
+  const handleEditRoutine = (routine: Routine) => {
+    navigation.navigate('CreateRoutine', { routine });
+  };
+
+  const handleDeleteRoutine = (routine: Routine) => {
+    setRoutineToDelete(routine);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeleteRoutine = async () => {
+    if (routineToDelete) {
+      try {
+        await deleteRoutine(routineToDelete.id);
+        setShowDeleteModal(false);
+        setRoutineToDelete(null);
+      } catch (error) {
+        Alert.alert('Error', 'Failed to delete routine. Please try again.');
+      }
+    }
+  };
+
+  const cancelDeleteRoutine = () => {
+    setShowDeleteModal(false);
+    setRoutineToDelete(null);
   };
 
   const handleNewRoutine = () => {
@@ -182,16 +208,14 @@ export default function RoutinesScreen() {
                   routine.difficulty.toLowerCase().includes(searchText.toLowerCase())
                 )
                 .map((routine) => (
-                  <RoutineCard
+                  <SwipeableRoutineCard
                     key={routine.id}
-                    id={routine.id}
-                    title={routine.title}
-                    exerciseCount={routine.exerciseCount}
-                    duration={routine.duration}
-                    difficulty={routine.difficulty}
-                    category={routine.category}
+                    routine={routine}
                     imageSource={{ uri: routine.imageUrl }}
                     onPress={() => handleRoutinePress(routine)}
+                    onEdit={() => handleEditRoutine(routine)}
+                    onDelete={() => handleDeleteRoutine(routine)}
+                    isUserRoutine={true}
                   />
                 ))}
             </>
@@ -252,6 +276,103 @@ export default function RoutinesScreen() {
         <Ionicons name="add" size={24} color="#FFFFFF" />
         <Text style={styles.fabText}>New Routine</Text>
       </TouchableOpacity>
+
+      {/* Custom Workout Modal */}
+      <Modal
+        visible={showWorkoutModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={handleCloseModal}
+      >
+        <Pressable style={styles.modalOverlay} onPress={handleCloseModal}>
+          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+            {selectedRoutine && (
+              <>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>
+                    {selectedRoutine.category === 'strength' ? '💪' : 
+                     selectedRoutine.category === 'cardio' ? '❤️' : 
+                     selectedRoutine.category === 'flexibility' ? '🧘' : '🏃'} {selectedRoutine.title}
+                  </Text>
+                  <TouchableOpacity onPress={handleCloseModal} style={styles.closeButton}>
+                    <Ionicons name="close" size={24} color="#8B9CB5" />
+                  </TouchableOpacity>
+                </View>
+                
+                <Text style={styles.modalDescription}>
+                  {selectedRoutine.description || 'Get ready for an amazing workout!'}
+                </Text>
+                
+                <View style={styles.modalStats}>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statNumber}>{selectedRoutine.exerciseCount}</Text>
+                    <Text style={styles.statLabel}>exercises</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statNumber}>{selectedRoutine.duration}</Text>
+                    <Text style={styles.statLabel}>minutes</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={[styles.statNumber, {
+                      color: selectedRoutine.difficulty === 'beginner' ? '#4CAF50' : 
+                             selectedRoutine.difficulty === 'intermediate' ? '#FF9800' : '#F44336'
+                    }]}>
+                      {selectedRoutine.difficulty === 'beginner' ? '🟢' : 
+                       selectedRoutine.difficulty === 'intermediate' ? '🟡' : '🔴'}
+                    </Text>
+                    <Text style={styles.statLabel}>
+                      {selectedRoutine.difficulty.charAt(0).toUpperCase() + selectedRoutine.difficulty.slice(1)}
+                    </Text>
+                  </View>
+                </View>
+                
+                <Text style={styles.modalSubtext}>💡 Ready to start your workout?</Text>
+                
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity style={styles.cancelButton} onPress={handleCloseModal}>
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.startButton} onPress={handleStartWorkout}>
+                    <Text style={styles.startButtonText}>Start Workout</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={showDeleteModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={cancelDeleteRoutine}
+      >
+        <Pressable style={styles.modalOverlay} onPress={cancelDeleteRoutine}>
+          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Delete Routine</Text>
+              <TouchableOpacity onPress={cancelDeleteRoutine} style={styles.closeButton}>
+                <Ionicons name="close" size={24} color="#8B9CB5" />
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.modalDescription}>
+              Are you sure you want to delete "{routineToDelete?.title}"? This action cannot be undone.
+            </Text>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.cancelButton} onPress={cancelDeleteRoutine}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteConfirmButton} onPress={confirmDeleteRoutine}>
+                <Text style={styles.deleteConfirmButtonText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -276,6 +397,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start', // left align
     paddingHorizontal: 24,
     paddingTop: GlobalStyles.layout.topPadding,
     paddingBottom: 24,
@@ -284,6 +408,8 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '700',
     color: '#1A1A1A',
+    textAlign: 'left',
+    flex: 1,
   },
   searchContainer: {
     paddingHorizontal: 24,
@@ -294,9 +420,10 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#1A1A1A',
     marginBottom: 16,
+    textAlign: 'left',
   },
   emptyState: {
     alignItems: 'center',
@@ -343,5 +470,119 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    flex: 1,
+    marginRight: 12,
+  },
+  closeButton: {
+    padding: 4,
+  },
+  modalDescription: {
+    fontSize: 16,
+    color: '#8B9CB5',
+    marginBottom: 24,
+    lineHeight: 24,
+  },
+  modalStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 24,
+    paddingVertical: 16,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statNumber: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#8B9CB5',
+    textTransform: 'uppercase',
+    fontWeight: '600',
+  },
+  modalSubtext: {
+    fontSize: 16,
+    color: '#8B9CB5',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#8B9CB5',
+  },
+  startButton: {
+    flex: 1,
+    backgroundColor: '#2196F3',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  startButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  deleteConfirmButton: {
+    flex: 1,
+    backgroundColor: '#F44336',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  deleteConfirmButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

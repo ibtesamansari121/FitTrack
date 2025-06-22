@@ -7,19 +7,17 @@ import {
   View, 
   ScrollView, 
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   RefreshControl
 } from "react-native";
 import { useAuthStore } from "../store/authStore";
+import { useWorkoutStore } from "../store/workoutStore";
 import { RoutineService } from "../services/routineService";
-import { WorkoutService } from "../services/workoutService";
-import { Ionicons } from '@expo/vector-icons';
 import { WorkoutCard } from "../components/WorkoutCard";
 import { ProgressBar } from "../components/ProgressBar";
 import { RestDayIllustration } from "../components/RestDayIllustration";
 import { Routine } from "../types/routine";
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { CompositeNavigationProp } from '@react-navigation/native';
@@ -34,10 +32,10 @@ type HomeScreenNavigationProp = CompositeNavigationProp<
 
 export default function HomeScreen() {
   const { user } = useAuthStore();
+  const { weeklyConsistency, loadWeeklyConsistency, loadRoutineSummary } = useWorkoutStore();
   const navigation = useNavigation<HomeScreenNavigationProp>();
   
   const [todaysRoutines, setTodaysRoutines] = useState<Routine[]>([]);
-  const [consistency, setConsistency] = useState({ completed: 0, total: 7 });
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -46,6 +44,15 @@ export default function HomeScreen() {
       loadHomeData();
     }
   }, [user]);
+
+  // Refresh data when screen comes into focus (e.g., after completing a workout)
+  useFocusEffect(
+    React.useCallback(() => {
+      if (user?.uid) {
+        loadWeeklyConsistency(user.uid);
+      }
+    }, [user?.uid, loadWeeklyConsistency])
+  );
 
   const loadHomeData = async () => {
     if (!user?.uid) return;
@@ -56,9 +63,11 @@ export default function HomeScreen() {
       const routines = await RoutineService.getTodaysRoutines(user.uid);
       setTodaysRoutines(routines);
 
-      // Load weekly consistency
-      const weeklyStats = await WorkoutService.getWeeklyConsistency(user.uid);
-      setConsistency(weeklyStats);
+      // Load weekly consistency and routine summary
+      await Promise.all([
+        loadWeeklyConsistency(user.uid),
+        loadRoutineSummary(user.uid)
+      ]);
     } catch (error) {
       // Handle error silently or show toast
     } finally {
@@ -74,10 +83,6 @@ export default function HomeScreen() {
 
   const handleStartWorkout = (routine: Routine) => {
     navigation.navigate('StartWorkout', { routine });
-  };
-
-  const handleSettings = () => {
-    Alert.alert('Settings', 'Settings feature coming soon!');
   };
 
   const getUserGreeting = () => {
@@ -119,9 +124,6 @@ export default function HomeScreen() {
           <View>
             <Text style={styles.appTitle}>FitTrack</Text>
           </View>
-          <TouchableOpacity style={styles.settingsButton} onPress={handleSettings}>
-            <Ionicons name="settings-outline" size={24} color="#1A1A1A" />
-          </TouchableOpacity>
         </View>
 
         {/* Welcome Section */}
@@ -170,25 +172,25 @@ export default function HomeScreen() {
           <Text style={styles.sectionTitle}>This Week's Progress</Text>
           <ProgressBar
             title="Workout Consistency"
-            progress={consistency.completed / consistency.total}
-            currentValue={consistency.completed}
-            maxValue={consistency.total}
+            progress={weeklyConsistency.completed / weeklyConsistency.total}
+            currentValue={weeklyConsistency.completed}
+            maxValue={weeklyConsistency.total}
             unit="Days"
           />
           
           {/* Consistency Message */}
           <View style={styles.consistencyMessage}>
-            {consistency.completed === 0 ? (
+            {weeklyConsistency.completed === 0 ? (
               <Text style={styles.encouragementText}>
                 💪 Start your first workout this week!
               </Text>
-            ) : consistency.completed >= 5 ? (
+            ) : weeklyConsistency.completed >= 5 ? (
               <Text style={styles.congratsText}>
                 🔥 Amazing! You're crushing your fitness goals!
               </Text>
             ) : (
               <Text style={styles.encouragementText}>
-                ⚡ Keep going! You're {consistency.total - consistency.completed} workout{consistency.total - consistency.completed !== 1 ? 's' : ''} away from a perfect week!
+                ⚡ Keep going! You're {weeklyConsistency.total - weeklyConsistency.completed} workout{weeklyConsistency.total - weeklyConsistency.completed !== 1 ? 's' : ''} away from a perfect week!
               </Text>
             )}
           </View>
@@ -222,7 +224,7 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     alignItems: 'center',
     paddingHorizontal: 24,
     paddingTop: GlobalStyles.layout.topPadding,
@@ -232,9 +234,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '700',
     color: '#1A1A1A',
-  },
-  settingsButton: {
-    padding: 8,
+    textAlign: 'left',
   },
   welcomeSection: {
     paddingHorizontal: 24,
@@ -246,17 +246,20 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
     lineHeight: 36,
     marginBottom: 8,
+    textAlign: 'left',
   },
   subWelcomeText: {
     fontSize: 16,
     color: '#8B9CB5',
     lineHeight: 22,
+    textAlign: 'left',
   },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '600',
     color: '#1A1A1A',
     marginBottom: 16,
+    textAlign: 'left',
   },
   cardContainer: {
     paddingHorizontal: 24,
@@ -286,11 +289,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
   },
   createRoutineButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '600'
   },
   consistencySection: {
     paddingHorizontal: 24,

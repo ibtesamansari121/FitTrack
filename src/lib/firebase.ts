@@ -15,6 +15,11 @@ const {
   firebaseAppId,
 } = Constants.expoConfig?.extra ?? {};
 
+// Validate Firebase configuration
+if (!firebaseApiKey || !firebaseProjectId) {
+  throw new Error('Firebase configuration is incomplete. Please check your environment variables.');
+}
+
 const firebaseConfig = {
   apiKey: firebaseApiKey,
   authDomain: firebaseAuthDomain,

@@ -38,15 +38,10 @@ export interface RoutineStats {
 export interface WorkoutExerciseLog {
   exerciseId: string;
   exerciseName: string;
-  sets: WorkoutSet[];
-  completedAt: Date;
-}
-
-export interface WorkoutSet {
   reps: number;
-  weight?: number;
+  weight: number;
   completed: boolean;
-  restTime?: number; // actual rest time taken
+  completedAt?: Date;
 }
 
 export interface WorkoutSession {
@@ -67,6 +62,7 @@ export interface ExerciseProgress {
   userId: string;
   sessions: {
     date: Date;
-    sets: WorkoutSet[];
+    reps: number;
+    weight: number;
   }[];
 }

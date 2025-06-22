@@ -10,13 +10,14 @@ import {
   ActivityIndicator,
   TextInput,
   Modal,
-  Image,
   Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RouteProp } from '@react-navigation/native';
 import { CustomInput } from '../components/CustomInput';
 import ExerciseCard from '../components/ExerciseCard';
+import AnimatedGif from '../components/AnimatedGif';
 import { ExerciseService } from '../services/exerciseService';
 import { useRoutineStore } from '../store/routineStore';
 import { useAuthStore } from '../store/authStore';
@@ -25,9 +26,11 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import GlobalStyles from '../styles/GlobalStyles';
 
 type CreateRoutineScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'CreateRoutine'>;
+type CreateRoutineScreenRouteProp = RouteProp<RootStackParamList, 'CreateRoutine'>;
 
 interface Props {
   navigation: CreateRoutineScreenNavigationProp;
+  route: CreateRoutineScreenRouteProp;
 }
 
 const BODY_PARTS = [
@@ -47,10 +50,10 @@ const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const { width } = Dimensions.get('window');
 
-export default function CreateRoutineScreen({ navigation }: Props) {
+export default function CreateRoutineScreen({ navigation, route }: Props) {
   const [routineName, setRoutineName] = useState('');
   const [selectedDays, setSelectedDays] = useState<string[]>([]);
-  const [selectedBodyPart, setSelectedBodyPart] = useState<string>('chest');
+  const [selectedBodyPart, setSelectedBodyPart] = useState<string>('back');
   const [searchQuery, setSearchQuery] = useState('');
   const [exercises, setExercises] = useState<any[]>([]);
   const [selectedExercises, setSelectedExercises] = useState<Exercise[]>([]);
@@ -60,7 +63,27 @@ export default function CreateRoutineScreen({ navigation }: Props) {
   const [showExerciseModal, setShowExerciseModal] = useState(false);
 
   const { user } = useAuthStore();
-  const { createRoutine } = useRoutineStore();
+  const { createRoutine, updateRoutine } = useRoutineStore();
+
+  // Get routine data for editing
+  const editingRoutine = route.params?.routine;
+  const isEditing = !!editingRoutine;
+
+  // Initialize form data for editing
+  useEffect(() => {
+    if (isEditing && editingRoutine) {
+      setRoutineName(editingRoutine.title || '');
+      
+      // Convert scheduledDays numbers back to day strings
+      if (editingRoutine.scheduledDays) {
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const dayStrings = editingRoutine.scheduledDays.map((dayNum: number) => dayNames[dayNum]).filter(Boolean);
+        setSelectedDays(dayStrings);
+      }
+      
+      setSelectedExercises(editingRoutine.exercises || []);
+    }
+  }, [isEditing, editingRoutine]);
 
   // Load exercises when body part changes
   useEffect(() => {
@@ -144,7 +167,7 @@ export default function CreateRoutineScreen({ navigation }: Props) {
       const dayMap = { 'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6 };
       const scheduledDays = selectedDays.map(day => dayMap[day as keyof typeof dayMap]).filter(day => day !== undefined);
 
-      const routine = {
+      const routineData = {
         title: routineName.trim(),
         description: `Custom routine with ${selectedExercises.length} exercises`,
         exerciseCount: selectedExercises.length,
@@ -159,20 +182,35 @@ export default function CreateRoutineScreen({ navigation }: Props) {
         scheduledDays: scheduledDays,
       };
 
-      await createRoutine(routine);
-      
-      Alert.alert(
-        'Success!',
-        'Your routine has been created successfully.',
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.goBack(),
-          }
-        ]
-      );
+      if (isEditing && editingRoutine) {
+        // Update existing routine
+        await updateRoutine(editingRoutine.id, routineData);
+        Alert.alert(
+          'Success!',
+          'Your routine has been updated successfully.',
+          [
+            {
+              text: 'OK',
+              onPress: () => navigation.goBack(),
+            }
+          ]
+        );
+      } else {
+        // Create new routine
+        await createRoutine(routineData);
+        Alert.alert(
+          'Success!',
+          'Your routine has been created successfully.',
+          [
+            {
+              text: 'OK',
+              onPress: () => navigation.goBack(),
+            }
+          ]
+        );
+      }
     } catch (error) {
-      Alert.alert('Error', 'Failed to create routine. Please try again.');
+      Alert.alert('Error', `Failed to ${isEditing ? 'update' : 'create'} routine. Please try again.`);
     } finally {
       setIsCreating(false);
     }
@@ -198,7 +236,7 @@ export default function CreateRoutineScreen({ navigation }: Props) {
         >
           <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
         </TouchableOpacity>
-        <Text style={styles.title}>Create Routine</Text>
+        <Text style={styles.title}>{isEditing ? 'Edit Routine' : 'Create Routine'}</Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -335,7 +373,7 @@ export default function CreateRoutineScreen({ navigation }: Props) {
               styles.createButtonText,
               (!routineName.trim() || selectedExercises.length === 0 || selectedDays.length === 0) && styles.createButtonTextDisabled
             ]}>
-              Create Routine
+              {isEditing ? 'Update Routine' : 'Create Routine'}
             </Text>
           )}
         </TouchableOpacity>
@@ -359,7 +397,7 @@ export default function CreateRoutineScreen({ navigation }: Props) {
           
           {selectedExerciseInfo && (
             <ScrollView style={styles.modalContent}>
-              <Image 
+              <AnimatedGif 
                 source={{ uri: selectedExerciseInfo.gifUrl || 'https://via.placeholder.com/400x300?text=Exercise' }}
                 style={styles.exerciseGif}
                 resizeMode="contain"
@@ -416,20 +454,20 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    justifyContent: 'flex-start', // left align
+    paddingHorizontal: 24,
+    paddingTop: GlobalStyles.layout.topPadding,
+    paddingBottom: 24,
   },
   backButton: {
     padding: 8,
   },
   title: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 28,
+    fontWeight: '700',
     color: '#1A1A1A',
+    textAlign: 'left',
+    flex: 1,
   },
   placeholder: {
     width: 40,
@@ -441,10 +479,11 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '600',
     color: '#1A1A1A',
     marginBottom: 16,
+    textAlign: 'left',
   },
   routineNameInput: {
     fontSize: 16,

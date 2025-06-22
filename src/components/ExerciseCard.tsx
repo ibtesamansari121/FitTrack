@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { 
   View, 
   Text, 
-  Image, 
   StyleSheet, 
   TouchableOpacity, 
   Modal,
@@ -10,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ExerciseAPIResponse } from '../services/exerciseService';
+import AnimatedGif from './AnimatedGif';
 
 interface ExerciseCardProps {
   exercise: ExerciseAPIResponse;
@@ -47,7 +47,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({
         activeOpacity={0.7}
       >
         <View style={styles.imageContainer}>
-          <Image 
+          <AnimatedGif 
             source={{ uri: exercise.gifUrl }} 
             style={styles.exerciseImage}
             resizeMode="cover"
@@ -104,7 +104,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({
           </View>
           
           <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-            <Image 
+            <AnimatedGif 
               source={{ uri: exercise.gifUrl }} 
               style={styles.modalImage}
               resizeMode="contain"

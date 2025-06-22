@@ -7,7 +7,6 @@ import {
   View,
   TouchableOpacity,
   Alert,
-  Image,
   TextInput,
   Modal,
   Dimensions,
@@ -18,6 +17,7 @@ import { RouteProp } from '@react-navigation/native';
 import { useAuthStore } from '../store/authStore';
 import { useWorkoutStore } from '../store/workoutStore';
 import { Exercise } from '../types/routine';
+import AnimatedGif from '../components/AnimatedGif';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import GlobalStyles from '../styles/GlobalStyles';
 
@@ -41,7 +41,7 @@ const { width } = Dimensions.get('window');
 export default function StartWorkoutScreen({ navigation, route }: Props) {
   const { routine } = route.params;
   const { user } = useAuthStore();
-  const { startWorkout: startWorkoutSession, completeWorkout: completeWorkoutSession } = useWorkoutStore();
+  const { startWorkout: startWorkoutSession, logExercise, completeWorkout: completeWorkoutSession } = useWorkoutStore();
   
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
   const [exerciseStates, setExerciseStates] = useState<ExerciseState[]>([]);
@@ -93,29 +93,37 @@ export default function StartWorkoutScreen({ navigation, route }: Props) {
     }
   };
 
-  const saveSet = () => {
-    if (!currentExercise) return;
+  const saveSet = async () => {
+    if (!currentExercise || !workoutId) return;
 
     const reps = parseInt(tempReps) || 0;
     const weight = parseFloat(tempWeight) || 0;
 
-    setExerciseStates(prev => 
-      prev.map((state, index) => {
-        if (index === currentExerciseIndex) {
-          return {
-            ...state,
-            reps,
-            weight,
-            completed: true,
-          };
-        }
-        return state;
-      })
-    );
+    try {
+      // Log exercise to Firestore
+      await logExercise(workoutId, currentExercise.exercise.id, reps, weight);
 
-    setShowSetModal(false);
-    setTempReps('');
-    setTempWeight('');
+      // Update local state
+      setExerciseStates(prev => 
+        prev.map((state, index) => {
+          if (index === currentExerciseIndex) {
+            return {
+              ...state,
+              reps,
+              weight,
+              completed: true,
+            };
+          }
+          return state;
+        })
+      );
+
+      setShowSetModal(false);
+      setTempReps('');
+      setTempWeight('');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to save exercise. Please try again.');
+    }
   };
 
   const nextExercise = () => {
@@ -139,7 +147,7 @@ export default function StartWorkoutScreen({ navigation, route }: Props) {
       const endTime = new Date();
       const duration = Math.round((endTime.getTime() - startTime.getTime()) / 60000);
       
-      await completeWorkoutSession(workoutId, duration);
+      await completeWorkoutSession(workoutId, duration, user.uid);
       
       Alert.alert(
         'Workout Complete!',
@@ -201,10 +209,10 @@ export default function StartWorkoutScreen({ navigation, route }: Props) {
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Exercise Image */}
         <View style={styles.imageContainer}>
-          <Image 
+          <AnimatedGif 
             source={{ uri: currentExercise.exercise.gifUrl || 'https://via.placeholder.com/400x300?text=Exercise' }}
             style={styles.exerciseImage}
-            defaultSource={{ uri: 'https://via.placeholder.com/400x300?text=Exercise' }}
+            resizeMode="cover"
           />
         </View>
 
@@ -347,20 +355,34 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    justifyContent: 'flex-start', // left align
+    paddingHorizontal: 24,
     paddingTop: GlobalStyles.layout.topPadding,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    paddingBottom: 24,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '600',
     color: '#1A1A1A',
+    flex: 1,
+    textAlign: 'center',
   },
   placeholder: {
     width: 24,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    textAlign: 'left',
+    flex: 1,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginBottom: 16,
+    textAlign: 'left',
   },
   progressContainer: {
     paddingHorizontal: 16,
