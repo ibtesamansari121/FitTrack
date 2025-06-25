@@ -18,7 +18,7 @@ import { RouteProp } from '@react-navigation/native';
 import { CustomInput } from '../components/CustomInput';
 import ExerciseCard from '../components/ExerciseCard';
 import AnimatedGif from '../components/AnimatedGif';
-import { ExerciseService } from '../services/exerciseService';
+import { FirestoreExerciseService } from '../services/firestoreExerciseService';
 import { useRoutineStore } from '../store/routineStore';
 import { useAuthStore } from '../store/authStore';
 import { Exercise } from '../types/routine';
@@ -58,6 +58,9 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
   const [exercises, setExercises] = useState<any[]>([]);
   const [selectedExercises, setSelectedExercises] = useState<Exercise[]>([]);
   const [isLoadingExercises, setIsLoadingExercises] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMoreExercises, setHasMoreExercises] = useState(true);
+  const [lastDocId, setLastDocId] = useState<string | undefined>(undefined);
   const [isCreating, setIsCreating] = useState(false);
   const [selectedExerciseInfo, setSelectedExerciseInfo] = useState<any>(null);
   const [showExerciseModal, setShowExerciseModal] = useState(false);
@@ -85,20 +88,63 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
     }
   }, [isEditing, editingRoutine]);
 
-  // Load exercises when body part changes
+  // Load exercises when body part changes - reset pagination
   useEffect(() => {
-    loadExercises();
+    loadExercises(true);
   }, [selectedBodyPart]);
 
-  const loadExercises = async () => {
-    setIsLoadingExercises(true);
+  const loadExercises = async (reset: boolean = false) => {
+    if (reset) {
+      setExercises([]);
+      setLastDocId(undefined);
+      setHasMoreExercises(true);
+    }
+    
+    // Only show loading spinner if we're not loading from cache or if it's a reset
+    const shouldShowLoading = reset;
+    if (shouldShowLoading) {
+      setIsLoadingExercises(true);
+    }
+    
     try {
-      const data = await ExerciseService.getExercisesByBodyPart(selectedBodyPart);
-      setExercises(data);
+      const result = await FirestoreExerciseService.getExercisesByBodyPartPaginated(selectedBodyPart, 10);
+      
+      if (reset) {
+        setExercises(result.exercises);
+      } else {
+        setExercises(prev => [...prev, ...result.exercises]);
+      }
+      
+      setHasMoreExercises(result.hasMore);
+      setLastDocId(result.lastDocId);
     } catch (error) {
+      console.error('Error loading exercises from Firestore:', error);
       Alert.alert('Error', 'Failed to load exercises. Please try again.');
     } finally {
-      setIsLoadingExercises(false);
+      if (shouldShowLoading) {
+        setIsLoadingExercises(false);
+      }
+    }
+  };
+
+  const loadMoreExercises = async () => {
+    if (!hasMoreExercises || !lastDocId || isLoadingMore) {
+      return;
+    }
+
+    setIsLoadingMore(true);
+    try {
+      const result = await FirestoreExerciseService.getExercisesByBodyPartPaginated(selectedBodyPart, 10, lastDocId);
+      
+      // Append new exercises to existing ones
+      setExercises(prev => [...prev, ...result.exercises]);
+      setHasMoreExercises(result.hasMore);
+      setLastDocId(result.lastDocId);
+    } catch (error) {
+      console.error('Error loading more exercises:', error);
+      Alert.alert('Error', 'Failed to load more exercises. Please try again.');
+    } finally {
+      setIsLoadingMore(false);
     }
   };
 
@@ -240,7 +286,19 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.scrollView} 
+        showsVerticalScrollIndicator={false}
+        onScroll={({ nativeEvent }) => {
+          const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
+          const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 100;
+          
+          if (isCloseToBottom && hasMoreExercises && !isLoadingMore && !isLoadingExercises) {
+            loadMoreExercises();
+          }
+        }}
+        scrollEventThrottle={400}
+      >
         {/* Routine Name */}
         <View style={styles.section}>
           <CustomInput
@@ -280,7 +338,7 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
           <Text style={styles.sectionTitle}>Exercises</Text>
           
           {/* Search */}
-          <View style={styles.searchContainer}>
+          {/* <View style={styles.searchContainer}>
             <Ionicons name="search" size={20} color="#8B9CB5" style={styles.searchIcon} />
             <TextInput
               style={styles.searchInput}
@@ -289,7 +347,7 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
               onChangeText={setSearchQuery}
               placeholderTextColor="#8B9CB5"
             />
-          </View>
+          </View> */}
 
           {/* Body Parts Filter */}
           <ScrollView 
@@ -317,22 +375,44 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
           </ScrollView>
 
           {/* Exercises List */}
-          {isLoadingExercises ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#2196F3" />
-              <Text style={styles.loadingText}>Loading exercises...</Text>
-            </View>
-          ) : (
-            filteredExercises.map((exercise) => (
-              <ExerciseCard
-                key={exercise.id}
-                exercise={exercise}
-                isSelected={selectedExercises.some(e => e.id === exercise.id)}
-                onToggle={() => toggleExercise(exercise)}
-                onShowInfo={() => showExerciseInfo(exercise)}
-              />
-            ))
-          )}
+          <View style={styles.exercisesContainer}>
+            {isLoadingExercises ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#2196F3" />
+                <Text style={styles.loadingText}>Loading exercises...</Text>
+              </View>
+            ) : (
+              <>
+                {filteredExercises.map((exercise) => (
+                  <ExerciseCard
+                    key={exercise.id}
+                    exercise={exercise}
+                    isSelected={selectedExercises.some(e => e.id === exercise.id)}
+                    onToggle={() => toggleExercise(exercise)}
+                    onShowInfo={() => showExerciseInfo(exercise)}
+                  />
+                ))}
+                {hasMoreExercises && filteredExercises.length > 0 && (
+                  <TouchableOpacity 
+                    style={styles.loadMoreButton}
+                    onPress={loadMoreExercises}
+                    disabled={isLoadingMore}
+                  >
+                    {isLoadingMore ? (
+                      <ActivityIndicator size="small" color="#2196F3" />
+                    ) : (
+                      <Text style={styles.loadMoreButtonText}>Load More Exercises</Text>
+                    )}
+                  </TouchableOpacity>
+                )}
+                {!hasMoreExercises && filteredExercises.length > 0 && (
+                  <View style={styles.endOfListContainer}>
+                    <Text style={styles.endOfListText}>No more exercises to load</Text>
+                  </View>
+                )}
+              </>
+            )}
+          </View>
         </View>
 
         {/* Selected Exercises Summary */}
@@ -679,5 +759,41 @@ const styles = StyleSheet.create({
   },
   createButtonTextDisabled: {
     color: '#8B9CB5',
+  },
+  loadingMoreContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  loadingMoreText: {
+    fontSize: 14,
+    color: '#666666',
+    marginTop: 8,
+  },
+  endOfListContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  endOfListText: {
+    fontSize: 14,
+    color: '#8B9CB5',
+    fontStyle: 'italic',
+  },
+  exercisesContainer: {
+    flex: 1,
+  },
+  loadMoreButton: {
+    backgroundColor: '#F0F8FF',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginVertical: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2196F3',
+  },
+  loadMoreButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2196F3',
   },
 });

@@ -8,7 +8,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { ExerciseAPIResponse } from '../services/exerciseService';
+import { ExerciseAPIResponse } from '../services/firestoreExerciseService';
 import AnimatedGif from './AnimatedGif';
 
 interface ExerciseCardProps {

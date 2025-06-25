@@ -8,6 +8,7 @@ export default {
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
+    userInterfaceStyle: "light",
     splash: {
       image: "./assets/splash.png",
       resizeMode: "contain",
@@ -25,10 +26,19 @@ export default {
         projectId: "e586b2fa-bf5e-4e5b-a3e7-e2ea8907ca51",
       },
     },
+    ios: {
+      supportsTablet: true,
+    },
     android: {
       package: "com.fittrack.app",
       versionCode: 1,
+      adaptiveIcon: {
+        foregroundImage: "./assets/icon.png",
+        backgroundColor: "#ffffff",
+      },
     },
-    // Add any other Expo config here
+    web: {
+      favicon: "./assets/favicon.png",
+    },
   },
 };

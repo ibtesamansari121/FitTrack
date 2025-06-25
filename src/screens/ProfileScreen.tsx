@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   SafeAreaView,
   ScrollView,
@@ -11,9 +11,10 @@ import {
   Modal,
   Pressable,
   TextInput,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { TabParamList } from '../navigation/TabNavigator';
 import { useAuthStore } from '../store/authStore';
@@ -32,10 +33,9 @@ interface ProfileStats {
 export default function ProfileScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<TabParamList>>();
   const { user } = useAuthStore();
-  const { userRoutines } = useRoutineStore();
-  const { routineSummary } = useWorkoutStore();
   const [stats, setStats] = useState<ProfileStats>({ totalWorkouts: 0, totalRoutines: 0, weeklyStreak: 0 });
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editName, setEditName] = useState(user?.displayName || '');
   const [editEmail, setEditEmail] = useState(user?.email || '');
@@ -50,20 +50,44 @@ export default function ProfileScreen() {
     }
   }, [user]);
 
-  const loadProfileStats = async () => {
+  // Refresh data when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.uid) {
+        loadProfileStats();
+      }
+    }, [user?.uid])
+  );
+
+  const loadProfileStats = async (showRefreshIndicator = false) => {
     if (!user?.uid) return;
     
-    setIsLoading(true);
+    if (showRefreshIndicator) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
+    }
+    
     try {
+      // Reload data from stores to get latest data
+      await Promise.all([
+        useRoutineStore.getState().loadUserRoutines(user.uid),
+        useWorkoutStore.getState().loadRoutineSummary(user.uid)
+      ]);
+      
       // Get total workouts completed
       const workouts = await WorkoutService.getUserWorkouts(user.uid);
       const completedWorkouts = workouts.filter(w => w.completedAt).length;
       
+      // Get updated data from stores
+      const { userRoutines: updatedRoutines } = useRoutineStore.getState();
+      const { routineSummary: updatedSummary } = useWorkoutStore.getState();
+      
       // Get weekly streak from routine summary
-      const weeklyStreak = routineSummary.streak || 0;
+      const weeklyStreak = updatedSummary.streak || 0;
       
       // Get total routines from routine store
-      const totalRoutines = userRoutines.length;
+      const totalRoutines = updatedRoutines.length;
       
       setStats({
         totalWorkouts: completedWorkouts,
@@ -71,11 +95,17 @@ export default function ProfileScreen() {
         weeklyStreak: weeklyStreak,
       });
     } catch (error) {
+      console.warn('Error loading profile stats:', error);
       // Handle error silently
     } finally {
       setIsLoading(false);
+      setIsRefreshing(false);
     }
   };
+
+  const onRefresh = useCallback(async () => {
+    await loadProfileStats(true);
+  }, [user?.uid]);
 
   const handleLogout = async () => {
     Alert.alert(
@@ -138,10 +168,34 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.scrollView} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+            colors={['#2196F3']} // Android
+            tintColor="#2196F3" // iOS
+            title="Pull to refresh" // iOS
+            titleColor="#666666" // iOS
+          />
+        }
+      >
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>Profile</Text>
+          <TouchableOpacity 
+            style={styles.refreshButton}
+            onPress={() => onRefresh()}
+            disabled={isRefreshing}
+          >
+            <Ionicons 
+              name="refresh" 
+              size={24} 
+              color={isRefreshing ? "#8B9CB5" : "#2196F3"} 
+            />
+          </TouchableOpacity>
         </View>
 
         {/* Profile Info */}
@@ -304,7 +358,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 24,
     paddingTop: GlobalStyles.layout.topPadding,
     paddingBottom: 24,
@@ -315,6 +369,12 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
     textAlign: 'left',
     flex: 1,
+  },
+  refreshButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#F0F8FF',
+    marginLeft: 16,
   },
   profileSection: {
     paddingHorizontal: 24,
