@@ -18,7 +18,7 @@ import { RouteProp } from '@react-navigation/native';
 import { CustomInput } from '../components/CustomInput';
 import ExerciseCard from '../components/ExerciseCard';
 import AnimatedGif from '../components/AnimatedGif';
-import { FirestoreExerciseService } from '../services/firestoreExerciseService';
+import { ExerciseService } from '../services/exerciseService';
 import { useRoutineStore } from '../store/routineStore';
 import { useAuthStore } from '../store/authStore';
 import { Exercise } from '../types/routine';
@@ -33,34 +33,23 @@ interface Props {
   route: CreateRoutineScreenRouteProp;
 }
 
-const BODY_PARTS = [
-  'back',
-  'cardio', 
-  'chest',
-  'lower arms',
-  'lower legs',
-  'neck',
-  'shoulders',
-  'upper arms',
-  'upper legs',
-  'waist'
-];
-
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const { width } = Dimensions.get('window');
 
-export default function CreateRoutineScreen({ navigation, route }: Props) {
+const CreateRoutineScreen = ({ navigation, route }: Props) => {
   const [routineName, setRoutineName] = useState('');
   const [selectedDays, setSelectedDays] = useState<string[]>([]);
-  const [selectedBodyPart, setSelectedBodyPart] = useState<string>('back');
+  const [bodyParts, setBodyParts] = useState<string[]>([]);
+  const [selectedBodyPart, setSelectedBodyPart] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchMode, setIsSearchMode] = useState(false);
   const [exercises, setExercises] = useState<any[]>([]);
   const [selectedExercises, setSelectedExercises] = useState<Exercise[]>([]);
   const [isLoadingExercises, setIsLoadingExercises] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMoreExercises, setHasMoreExercises] = useState(true);
-  const [lastDocId, setLastDocId] = useState<string | undefined>(undefined);
+  const [currentOffset, setCurrentOffset] = useState(0);
   const [isCreating, setIsCreating] = useState(false);
   const [selectedExerciseInfo, setSelectedExerciseInfo] = useState<any>(null);
   const [showExerciseModal, setShowExerciseModal] = useState(false);
@@ -76,70 +65,162 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
   useEffect(() => {
     if (isEditing && editingRoutine) {
       setRoutineName(editingRoutine.title || '');
-      
+
       // Convert scheduledDays numbers back to day strings
       if (editingRoutine.scheduledDays) {
         const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         const dayStrings = editingRoutine.scheduledDays.map((dayNum: number) => dayNames[dayNum]).filter(Boolean);
         setSelectedDays(dayStrings);
       }
-      
+
       setSelectedExercises(editingRoutine.exercises || []);
     }
   }, [isEditing, editingRoutine]);
 
-  // Load exercises when body part changes - reset pagination
+  // Load body parts from API
   useEffect(() => {
-    loadExercises(true);
+    const loadBodyParts = async () => {
+      try {
+        const parts = await ExerciseService.getBodyParts();
+        setBodyParts(parts);
+        // Set first body part as default if not set
+        if (parts.length > 0 && !selectedBodyPart) {
+          setSelectedBodyPart(parts[0]);
+        }
+      } catch (error) {
+        console.error('Error loading body parts:', error);
+        // Use fallback body parts
+        const fallbackParts = [
+          'back', 'cardio', 'chest', 'lower arms', 'lower legs',
+          'neck', 'shoulders', 'upper arms', 'upper legs', 'waist'
+        ];
+        setBodyParts(fallbackParts);
+        if (!selectedBodyPart) {
+          setSelectedBodyPart(fallbackParts[0]);
+        }
+      }
+    };
+
+    loadBodyParts();
+  }, []);
+
+  useEffect(() => {
+    console.log('selectedBodyPart effect triggered:', selectedBodyPart);
+    if (selectedBodyPart) {
+      loadExercises(true);
+    }
   }, [selectedBodyPart]);
 
-  const loadExercises = async (reset: boolean = false) => {
+  // Handle search with debouncing
+  useEffect(() => {
+    console.log('search effect triggered:', { searchQuery, selectedBodyPart, isSearchMode });
+    // Don't run on initial mount when selectedBodyPart is not set yet
+    if (!selectedBodyPart) return;
+    
+    const timeoutId = setTimeout(() => {
+      if (searchQuery.trim().length >= 2) {
+        console.log('Switching to search mode');
+        setIsSearchMode(true);
+        loadSearchResults(true);
+      } else if (searchQuery.trim().length === 0 && isSearchMode) {
+        // Only reset to body part view if we were previously in search mode
+        console.log('Switching back to body part mode');
+        setIsSearchMode(false);
+        loadExercises(true);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery, selectedBodyPart, isSearchMode]);
+
+  const loadSearchResults = async (reset: boolean = false) => {
     if (reset) {
       setExercises([]);
-      setLastDocId(undefined);
+      setCurrentOffset(0);
       setHasMoreExercises(true);
     }
-    
-    // Only show loading spinner if we're not loading from cache or if it's a reset
-    const shouldShowLoading = reset;
-    if (shouldShowLoading) {
-      setIsLoadingExercises(true);
-    }
-    
+
+    setIsLoadingExercises(true);
+
     try {
-      const result = await FirestoreExerciseService.getExercisesByBodyPartPaginated(selectedBodyPart, 10);
-      
+      const offset = reset ? 0 : currentOffset;
+      const results = await ExerciseService.searchExercises(searchQuery.trim(), 20, offset);
+
       if (reset) {
-        setExercises(result.exercises);
+        setExercises(results);
       } else {
-        setExercises(prev => [...prev, ...result.exercises]);
+        setExercises(prev => [...prev, ...results]);
       }
-      
-      setHasMoreExercises(result.hasMore);
-      setLastDocId(result.lastDocId);
+
+      setHasMoreExercises(results.length === 20);
+      setCurrentOffset(offset + results.length);
     } catch (error) {
-      console.error('Error loading exercises from Firestore:', error);
+      console.error('Error searching exercises:', error);
+      Alert.alert('Error', 'Failed to search exercises. Please try again.');
+    } finally {
+      setIsLoadingExercises(false);
+    }
+  };
+
+  const loadExercises = async (reset: boolean = false) => {
+    console.log('loadExercises called with reset:', reset, 'selectedBodyPart:', selectedBodyPart);
+    
+    if (reset) {
+      setExercises([]);
+      setCurrentOffset(0);
+      setHasMoreExercises(true);
+    }
+
+    if (!selectedBodyPart) {
+      console.log('No selectedBodyPart, returning early');
+      return;
+    }
+
+    setIsLoadingExercises(true);
+
+    try {
+      // Use new ExerciseService with body part filtering
+      console.log('Loading exercises for body part:', selectedBodyPart);
+      const offset = reset ? 0 : currentOffset;
+      const results = await ExerciseService.getExercisesByBodyPart(selectedBodyPart, 20, offset);
+      console.log('Loaded exercises:', results.length);
+
+      if (reset) {
+        setExercises(results);
+      } else {
+        setExercises(prev => [...prev, ...results]);
+      }
+
+      setHasMoreExercises(results.length === 20);
+      setCurrentOffset(offset + results.length);
+    } catch (error) {
+      console.error('Error loading exercises:', error);
       Alert.alert('Error', 'Failed to load exercises. Please try again.');
     } finally {
-      if (shouldShowLoading) {
-        setIsLoadingExercises(false);
-      }
+      setIsLoadingExercises(false);
     }
   };
 
   const loadMoreExercises = async () => {
-    if (!hasMoreExercises || !lastDocId || isLoadingMore) {
+    if (!hasMoreExercises || isLoadingMore) {
       return;
     }
 
     setIsLoadingMore(true);
     try {
-      const result = await FirestoreExerciseService.getExercisesByBodyPartPaginated(selectedBodyPart, 10, lastDocId);
-      
-      // Append new exercises to existing ones
-      setExercises(prev => [...prev, ...result.exercises]);
-      setHasMoreExercises(result.hasMore);
-      setLastDocId(result.lastDocId);
+      if (isSearchMode && searchQuery.trim().length >= 2) {
+        // Load more search results
+        const results = await ExerciseService.searchExercises(searchQuery.trim(), 20, currentOffset);
+        setExercises(prev => [...prev, ...results]);
+        setHasMoreExercises(results.length === 20);
+        setCurrentOffset(prev => prev + results.length);
+      } else {
+        // Load more exercises by body part
+        const results = await ExerciseService.getExercisesByBodyPart(selectedBodyPart, 20, currentOffset);
+        setExercises(prev => [...prev, ...results]);
+        setHasMoreExercises(results.length === 20);
+        setCurrentOffset(prev => prev + results.length);
+      }
     } catch (error) {
       console.error('Error loading more exercises:', error);
       Alert.alert('Error', 'Failed to load more exercises. Please try again.');
@@ -149,35 +230,44 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
   };
 
   const toggleDay = (day: string) => {
-    setSelectedDays(prev => 
-      prev.includes(day) 
+    setSelectedDays(prev =>
+      prev.includes(day)
         ? prev.filter(d => d !== day)
         : [...prev, day]
     );
   };
 
   const toggleExercise = (exercise: any) => {
-    const isSelected = selectedExercises.some(e => e.id === exercise.id);
-    
+    // Use exerciseId as primary identifier, fallback to id for compatibility
+    const exerciseIdentifier = exercise.exerciseId || exercise.id;
+    const isSelected = selectedExercises.some(e => e.id === exerciseIdentifier);
+
     if (isSelected) {
-      setSelectedExercises(prev => prev.filter(e => e.id !== exercise.id));
+      setSelectedExercises(prev => prev.filter(e => e.id !== exerciseIdentifier));
     } else {
       const newExercise: Exercise = {
-        id: exercise.id,
+        id: exerciseIdentifier,
         name: exercise.name,
         sets: 3,
         reps: 12,
         restTime: 60,
-        instructions: exercise.instructions?.join(' ') || '',
+        instructions: Array.isArray(exercise.instructions)
+          ? exercise.instructions.join(' ')
+          : exercise.instructions || '',
         gifUrl: exercise.gifUrl || '',
       };
       setSelectedExercises(prev => [...prev, newExercise]);
     }
   };
 
-  const filteredExercises = exercises.filter(exercise =>
-    exercise.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const handleBodyPartChange = (bodyPart: string) => {
+    setSelectedBodyPart(bodyPart);
+    // Clear search when changing body part
+    if (searchQuery.trim().length > 0) {
+      setSearchQuery('');
+      setIsSearchMode(false);
+    }
+  };
 
   const handleCreateRoutine = async () => {
     if (!routineName.trim()) {
@@ -218,8 +308,8 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
         description: `Custom routine with ${selectedExercises.length} exercises`,
         exerciseCount: selectedExercises.length,
         duration: Math.ceil(estimatedDuration),
-        difficulty: (selectedExercises.length <= 3 ? 'beginner' : 
-                   selectedExercises.length <= 6 ? 'intermediate' : 'advanced') as 'beginner' | 'intermediate' | 'advanced',
+        difficulty: (selectedExercises.length <= 3 ? 'beginner' :
+          selectedExercises.length <= 6 ? 'intermediate' : 'advanced') as 'beginner' | 'intermediate' | 'advanced',
         category: 'mixed' as const,
         imageUrl: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=400&h=400&fit=crop',
         exercises: selectedExercises,
@@ -276,7 +366,7 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
     <SafeAreaView style={[styles.container, { paddingTop: GlobalStyles.layout.topPadding }]}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
@@ -286,13 +376,13 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView 
-        style={styles.scrollView} 
+      <ScrollView
+        style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         onScroll={({ nativeEvent }) => {
           const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
           const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 100;
-          
+
           if (isCloseToBottom && hasMoreExercises && !isLoadingMore && !isLoadingExercises) {
             loadMoreExercises();
           }
@@ -336,64 +426,91 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
         {/* Exercises */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Exercises</Text>
-          
+
           {/* Search */}
-          {/* <View style={styles.searchContainer}>
+          <View style={styles.searchContainer}>
             <Ionicons name="search" size={20} color="#8B9CB5" style={styles.searchIcon} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search exercise"
+              placeholder="Search exercises..."
               value={searchQuery}
               onChangeText={setSearchQuery}
               placeholderTextColor="#8B9CB5"
             />
-          </View> */}
+            {searchQuery.length > 0 && (
+              <TouchableOpacity
+                onPress={() => {
+                  setSearchQuery('');
+                  setIsSearchMode(false);
+                }}
+                style={styles.clearSearchButton}
+              >
+                <Ionicons name="close" size={20} color="#8B9CB5" />
+              </TouchableOpacity>
+            )}
+          </View>
 
           {/* Body Parts Filter */}
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            style={styles.bodyPartsContainer}
-          >
-            {BODY_PARTS.map((bodyPart) => (
-              <TouchableOpacity
-                key={bodyPart}
-                style={[
-                  styles.bodyPartButton,
-                  selectedBodyPart === bodyPart && styles.bodyPartButtonSelected
-                ]}
-                onPress={() => setSelectedBodyPart(bodyPart)}
-              >
-                <Text style={[
-                  styles.bodyPartButtonText,
-                  selectedBodyPart === bodyPart && styles.bodyPartButtonTextSelected
-                ]}>
-                  {bodyPart.charAt(0).toUpperCase() + bodyPart.slice(1)}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+          {!isSearchMode && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.bodyPartsContainer}
+            >
+              {bodyParts.map((bodyPart) => (
+                <TouchableOpacity
+                  key={bodyPart}
+                  style={[
+                    styles.bodyPartButton,
+                    selectedBodyPart === bodyPart && styles.bodyPartButtonSelected
+                  ]}
+                  onPress={() => handleBodyPartChange(bodyPart)}
+                >
+                  <Text style={[
+                    styles.bodyPartButtonText,
+                    selectedBodyPart === bodyPart && styles.bodyPartButtonTextSelected
+                  ]}>
+                    {bodyPart.charAt(0).toUpperCase() + bodyPart.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+
+          {/* Search Results Header */}
+          {isSearchMode && searchQuery.length >= 2 && (
+            <View style={styles.searchHeaderContainer}>
+              <Text style={styles.searchHeaderText}>
+                Search results for "{searchQuery}"
+              </Text>
+              <Text style={styles.searchResultsCount}>
+                {exercises.length} exercises found
+              </Text>
+            </View>
+          )}
 
           {/* Exercises List */}
           <View style={styles.exercisesContainer}>
             {isLoadingExercises ? (
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color="#2196F3" />
-                <Text style={styles.loadingText}>Loading exercises...</Text>
+                <Text style={styles.loadingText}>
+                  {isSearchMode ? 'Searching exercises...' : 'Loading exercises...'}
+                </Text>
               </View>
             ) : (
               <>
-                {filteredExercises.map((exercise) => (
+                {exercises.map((exercise) => (
                   <ExerciseCard
-                    key={exercise.id}
+                    key={exercise.exerciseId || exercise.id}
                     exercise={exercise}
-                    isSelected={selectedExercises.some(e => e.id === exercise.id)}
+                    isSelected={selectedExercises.some(e => e.id === (exercise.exerciseId || exercise.id))}
                     onToggle={() => toggleExercise(exercise)}
                     onShowInfo={() => showExerciseInfo(exercise)}
                   />
                 ))}
-                {hasMoreExercises && filteredExercises.length > 0 && (
-                  <TouchableOpacity 
+                {hasMoreExercises && exercises.length > 0 && (
+                  <TouchableOpacity
                     style={styles.loadMoreButton}
                     onPress={loadMoreExercises}
                     disabled={isLoadingMore}
@@ -405,9 +522,19 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
                     )}
                   </TouchableOpacity>
                 )}
-                {!hasMoreExercises && filteredExercises.length > 0 && (
+                {!hasMoreExercises && exercises.length > 0 && (
                   <View style={styles.endOfListContainer}>
                     <Text style={styles.endOfListText}>No more exercises to load</Text>
+                  </View>
+                )}
+                {exercises.length === 0 && !isLoadingExercises && (
+                  <View style={styles.emptyStateContainer}>
+                    <Text style={styles.emptyStateText}>
+                      {isSearchMode
+                        ? `No exercises found for "${searchQuery}"`
+                        : `No exercises found for ${selectedBodyPart}`
+                      }
+                    </Text>
                   </View>
                 )}
               </>
@@ -458,7 +585,7 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
           )}
         </TouchableOpacity>
       </View>
-      
+
       {/* Exercise Info Modal */}
       <Modal
         visible={showExerciseModal}
@@ -474,18 +601,18 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
             <Text style={styles.modalTitle}>Exercise Info</Text>
             <View style={{ width: 24 }} />
           </View>
-          
+
           {selectedExerciseInfo && (
             <ScrollView style={styles.modalContent}>
-              <AnimatedGif 
+              <AnimatedGif
                 source={{ uri: selectedExerciseInfo.gifUrl || 'https://via.placeholder.com/400x300?text=Exercise' }}
                 style={styles.exerciseGif}
                 resizeMode="contain"
               />
-              
+
               <View style={styles.modalDetails}>
                 <Text style={styles.exerciseName}>{selectedExerciseInfo.name}</Text>
-                
+
                 <View style={styles.badgeRow}>
                   <View style={styles.badge}>
                     <Text style={styles.badgeText}>{selectedExerciseInfo.bodyPart}</Text>
@@ -497,7 +624,7 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
                     <Text style={styles.badgeText}>{selectedExerciseInfo.equipment}</Text>
                   </View>
                 </View>
-                
+
                 {selectedExerciseInfo.instructions && selectedExerciseInfo.instructions.length > 0 && (
                   <>
                     <Text style={styles.modalSectionTitle}>Instructions</Text>
@@ -508,7 +635,7 @@ export default function CreateRoutineScreen({ navigation, route }: Props) {
                     ))}
                   </>
                 )}
-                
+
                 {selectedExerciseInfo.secondaryMuscles && selectedExerciseInfo.secondaryMuscles.length > 0 && (
                   <>
                     <Text style={styles.modalSectionTitle}>Secondary Muscles</Text>
@@ -796,4 +923,34 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#2196F3',
   },
+  clearSearchButton: {
+    padding: 4,
+  },
+  searchHeaderContainer: {
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  searchHeaderText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginBottom: 4,
+  },
+  searchResultsCount: {
+    fontSize: 14,
+    color: '#8B9CB5',
+  },
+  emptyStateContainer: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: '#8B9CB5',
+    textAlign: 'center',
+  },
 });
+
+export default CreateRoutineScreen;

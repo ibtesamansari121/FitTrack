@@ -1,112 +1,86 @@
 // Fetch is available globally in React Native
 declare const fetch: typeof globalThis.fetch;
 
-import Constants from "expo-constants";
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// Read API key from Expo's app.config.js (populated from .env)
-const { rapidApiKey } = Constants.expoConfig?.extra ?? {};
-const RAPID_API_KEY = rapidApiKey;
-
-if (!RAPID_API_KEY) {
-  throw new Error('RAPID_API_KEY is not configured. Please check your .env file.');
-}
-
-const RAPID_API_HOST = 'exercisedb.p.rapidapi.com';
-const BASE_URL = 'https://exercisedb.p.rapidapi.com';
-
-// Cache configuration
-const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-const CACHE_PREFIX = 'exercises_cache_';
-
-interface CachedData<T> {
-  data: T;
-  timestamp: number;
-  bodyPart?: string;
-  limit?: number;
-  offset?: number;
-}
+const BASE_URL = 'https://exercisedb-api.vercel.app';
 
 export interface ExerciseAPIResponse {
+  exerciseId: string;
+  name: string;
+  gifUrl: string;
+  instructions: string[];
+  targetMuscles: string[];
+  bodyParts: string[];
+  equipments: string[];
+  secondaryMuscles: string[];
+  // Legacy compatibility fields (mapped from new API)
+  id: string;
   bodyPart: string;
   equipment: string;
-  gifUrl: string;
-  id: string;
-  name: string;
   target: string;
-  secondaryMuscles: string[];
-  instructions: string[];
   description: string;
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   category: 'strength' | 'cardio' | 'flexibility';
 }
 
+interface ExerciseDBAPIResponse {
+  success: boolean;
+  data: {
+    previousPage: string | null;
+    nextPage: string | null;
+    totalPages: number;
+    totalExercises: number;
+    currentPage: number;
+    exercises: {
+      exerciseId: string;
+      name: string;
+      gifUrl: string;
+      instructions: string[];
+      targetMuscles: string[];
+      bodyParts: string[];
+      equipments: string[];
+      secondaryMuscles: string[];
+    }[];
+  };
+}
+
+interface BodyPartAPIResponse {
+  success: boolean;
+  data: {
+    name: string;
+  }[];
+}
+
 export class ExerciseService {
-  // Cache management methods
-  private static async getCachedData<T>(key: string): Promise<T | null> {
-    try {
-      const cached = await AsyncStorage.getItem(`${CACHE_PREFIX}${key}`);
-      if (!cached) return null;
-
-      const parsedCache: CachedData<T> = JSON.parse(cached);
-      const now = Date.now();
-      
-      // Check if cache is still valid
-      if (now - parsedCache.timestamp > CACHE_DURATION) {
-        await AsyncStorage.removeItem(`${CACHE_PREFIX}${key}`);
-        return null;
-      }
-      
-      return parsedCache.data;
-    } catch (error) {
-      console.warn('Error reading from cache:', error);
-      return null;
-    }
-  }
-
-  private static async setCachedData<T>(key: string, data: T, metadata?: any): Promise<void> {
-    try {
-      const cacheData: CachedData<T> = {
-        data,
-        timestamp: Date.now(),
-        ...metadata
-      };
-      
-      await AsyncStorage.setItem(`${CACHE_PREFIX}${key}`, JSON.stringify(cacheData));
-    } catch (error) {
-      console.warn('Error writing to cache:', error);
-    }
-  }
-
-  private static async clearCache(): Promise<void> {
-    try {
-      const keys = await AsyncStorage.getAllKeys();
-      const cacheKeys = keys.filter(key => key.startsWith(CACHE_PREFIX));
-      await AsyncStorage.multiRemove(cacheKeys);
-    } catch (error) {
-      console.warn('Error clearing cache:', error);
-    }
+  // Helper method to convert new API response to legacy format for compatibility
+  private static convertToLegacyFormat(exercise: any): ExerciseAPIResponse {
+    return {
+      exerciseId: exercise.exerciseId,
+      name: exercise.name,
+      gifUrl: exercise.gifUrl,
+      instructions: exercise.instructions,
+      targetMuscles: exercise.targetMuscles,
+      bodyParts: exercise.bodyParts,
+      equipments: exercise.equipments,
+      secondaryMuscles: exercise.secondaryMuscles,
+      // Legacy compatibility fields
+      id: exercise.exerciseId,
+      bodyPart: exercise.bodyParts?.[0] || '',
+      equipment: exercise.equipments?.[0] || '',
+      target: exercise.targetMuscles?.[0] || '',
+      description: `${exercise.name} is a ${exercise.bodyParts?.[0] || 'full body'} exercise using ${exercise.equipments?.[0] || 'equipment'}.`,
+      difficulty: this.inferDifficulty(exercise),
+      category: this.inferCategory(exercise),
+    };
   }
 
   static async getExercisesByBodyPart(bodyPart: string, limit: number = 50, offset: number = 0): Promise<ExerciseAPIResponse[]> {
-    const cacheKey = `bodypart_${bodyPart}_${limit}_${offset}`;
-    
-    // Try to get from cache first
-    const cachedData = await this.getCachedData<ExerciseAPIResponse[]>(cacheKey);
-    if (cachedData) {
-      console.log(`Loaded ${bodyPart} exercises from cache`);
-      return cachedData;
-    }
-
     try {
-      console.log(`Fetching ${bodyPart} exercises from API`);
       const response = await fetch(
-        `${BASE_URL}/exercises/bodyPart/${bodyPart}?limit=${limit}&offset=${offset}`,
+        `${BASE_URL}/api/v1/bodyparts/${encodeURIComponent(bodyPart)}/exercises?limit=${limit}&offset=${offset}`,
         {
           method: 'GET',
           headers: {
-            'X-RapidAPI-Key': RAPID_API_KEY,
-            'X-RapidAPI-Host': RAPID_API_HOST,
+            'Content-Type': 'application/json',
           },
         }
       );
@@ -115,44 +89,26 @@ export class ExerciseService {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
+      const apiResponse: ExerciseDBAPIResponse = await response.json();
       
-      // Add missing properties with defaults if they don't exist
-      const processedData = data.map((exercise: any) => ({
-        ...exercise,
-        difficulty: exercise.difficulty || this.inferDifficulty(exercise),
-        category: exercise.category || this.inferCategory(exercise),
-        description: exercise.description || `${exercise.name} is a ${exercise.bodyPart} exercise using ${exercise.equipment}.`,
-      }));
+      if (!apiResponse.success) {
+        throw new Error('API request failed');
+      }
 
-      // Cache the processed data
-      await this.setCachedData(cacheKey, processedData, { bodyPart, limit, offset });
-      
-      return processedData;
+      return apiResponse.data.exercises.map(exercise => this.convertToLegacyFormat(exercise));
     } catch (error) {
       throw new Error(`Failed to fetch exercises: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   static async getAllExercises(limit: number = 100, offset: number = 0): Promise<ExerciseAPIResponse[]> {
-    const cacheKey = `all_exercises_${limit}_${offset}`;
-    
-    // Try to get from cache first
-    const cachedData = await this.getCachedData<ExerciseAPIResponse[]>(cacheKey);
-    if (cachedData) {
-      console.log('Loaded all exercises from cache');
-      return cachedData;
-    }
-
     try {
-      console.log('Fetching all exercises from API');
       const response = await fetch(
-        `${BASE_URL}/exercises?limit=${limit}&offset=${offset}`,
+        `${BASE_URL}/api/v1/exercises?limit=${limit}&offset=${offset}`,
         {
           method: 'GET',
           headers: {
-            'X-RapidAPI-Key': RAPID_API_KEY,
-            'X-RapidAPI-Host': RAPID_API_HOST,
+            'Content-Type': 'application/json',
           },
         }
       );
@@ -161,43 +117,26 @@ export class ExerciseService {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
+      const apiResponse: ExerciseDBAPIResponse = await response.json();
       
-      const processedData = data.map((exercise: any) => ({
-        ...exercise,
-        difficulty: exercise.difficulty || this.inferDifficulty(exercise),
-        category: exercise.category || this.inferCategory(exercise),
-        description: exercise.description || `${exercise.name} is a ${exercise.bodyPart} exercise using ${exercise.equipment}.`,
-      }));
+      if (!apiResponse.success) {
+        throw new Error('API request failed');
+      }
 
-      // Cache the processed data
-      await this.setCachedData(cacheKey, processedData, { limit, offset });
-      
-      return processedData;
+      return apiResponse.data.exercises.map(exercise => this.convertToLegacyFormat(exercise));
     } catch (error) {
       throw new Error(`Failed to fetch exercises: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   static async getExerciseById(id: string): Promise<ExerciseAPIResponse | null> {
-    const cacheKey = `exercise_${id}`;
-    
-    // Try to get from cache first
-    const cachedData = await this.getCachedData<ExerciseAPIResponse>(cacheKey);
-    if (cachedData) {
-      console.log(`Loaded exercise ${id} from cache`);
-      return cachedData;
-    }
-
     try {
-      console.log(`Fetching exercise ${id} from API`);
       const response = await fetch(
-        `${BASE_URL}/exercises/exercise/${id}`,
+        `${BASE_URL}/api/v1/exercises/${id}`,
         {
           method: 'GET',
           headers: {
-            'X-RapidAPI-Key': RAPID_API_KEY,
-            'X-RapidAPI-Host': RAPID_API_HOST,
+            'Content-Type': 'application/json',
           },
         }
       );
@@ -209,43 +148,26 @@ export class ExerciseService {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const exercise = await response.json();
+      const apiResponse = await response.json();
       
-      const processedExercise = {
-        ...exercise,
-        difficulty: exercise.difficulty || this.inferDifficulty(exercise),
-        category: exercise.category || this.inferCategory(exercise),
-        description: exercise.description || `${exercise.name} is a ${exercise.bodyPart} exercise using ${exercise.equipment}.`,
-      };
+      if (!apiResponse.success) {
+        return null;
+      }
 
-      // Cache the processed data
-      await this.setCachedData(cacheKey, processedExercise, { id });
-      
-      return processedExercise;
+      return this.convertToLegacyFormat(apiResponse.data);
     } catch (error) {
       throw new Error(`Failed to fetch exercise: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
-  static async searchExercises(query: string, limit: number = 50): Promise<ExerciseAPIResponse[]> {
-    const cacheKey = `search_${encodeURIComponent(query.toLowerCase())}_${limit}`;
-    
-    // Try to get from cache first
-    const cachedData = await this.getCachedData<ExerciseAPIResponse[]>(cacheKey);
-    if (cachedData) {
-      console.log(`Loaded search results for "${query}" from cache`);
-      return cachedData;
-    }
-
+  static async searchExercises(query: string, limit: number = 50, offset: number = 0): Promise<ExerciseAPIResponse[]> {
     try {
-      console.log(`Searching exercises for "${query}" from API`);
       const response = await fetch(
-        `${BASE_URL}/exercises/name/${encodeURIComponent(query)}?limit=${limit}`,
+        `${BASE_URL}/api/v1/exercises?limit=${limit}&offset=${offset}&search=${encodeURIComponent(query)}`,
         {
           method: 'GET',
           headers: {
-            'X-RapidAPI-Key': RAPID_API_KEY,
-            'X-RapidAPI-Host': RAPID_API_HOST,
+            'Content-Type': 'application/json',
           },
         }
       );
@@ -254,58 +176,23 @@ export class ExerciseService {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
+      const apiResponse: ExerciseDBAPIResponse = await response.json();
       
-      const processedData = data.map((exercise: any) => ({
-        ...exercise,
-        difficulty: exercise.difficulty || this.inferDifficulty(exercise),
-        category: exercise.category || this.inferCategory(exercise),
-        description: exercise.description || `${exercise.name} is a ${exercise.bodyPart} exercise using ${exercise.equipment}.`,
-      }));
+      if (!apiResponse.success) {
+        throw new Error('API request failed');
+      }
 
-      // Cache the processed data
-      await this.setCachedData(cacheKey, processedData, { query, limit });
-      
-      return processedData;
+      return apiResponse.data.exercises.map(exercise => this.convertToLegacyFormat(exercise));
     } catch (error) {
       throw new Error(`Failed to search exercises: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
-  // Public method to clear all cached data
-  static async clearAllCache(): Promise<void> {
-    await this.clearCache();
-    console.log('Exercise cache cleared');
-  }
-
-  // Public method to check cache status
-  static async getCacheInfo(): Promise<{ totalCacheSize: number; cacheKeys: string[] }> {
-    try {
-      const keys = await AsyncStorage.getAllKeys();
-      const cacheKeys = keys.filter(key => key.startsWith(CACHE_PREFIX));
-      
-      let totalSize = 0;
-      for (const key of cacheKeys) {
-        const item = await AsyncStorage.getItem(key);
-        if (item) {
-          totalSize += item.length;
-        }
-      }
-      
-      return {
-        totalCacheSize: totalSize,
-        cacheKeys: cacheKeys.map(key => key.replace(CACHE_PREFIX, ''))
-      };
-    } catch (error) {
-      console.warn('Error getting cache info:', error);
-      return { totalCacheSize: 0, cacheKeys: [] };
-    }
-  }
-
   // Helper method to infer difficulty based on equipment and exercise type
   private static inferDifficulty(exercise: any): 'beginner' | 'intermediate' | 'advanced' {
-    const name = exercise.name.toLowerCase();
-    const equipment = exercise.equipment.toLowerCase();
+    const name = exercise.name?.toLowerCase() || '';
+    const equipments = exercise.equipments || [];
+    const equipment = equipments.join(' ').toLowerCase();
     
     // Advanced exercises
     if (name.includes('olympic') || name.includes('snatch') || name.includes('clean') || 
@@ -325,18 +212,20 @@ export class ExerciseService {
 
   // Helper method to infer category based on body part and equipment
   private static inferCategory(exercise: any): 'strength' | 'cardio' | 'flexibility' {
-    const bodyPart = exercise.bodyPart.toLowerCase();
-    const equipment = exercise.equipment.toLowerCase();
-    const name = exercise.name.toLowerCase();
+    const bodyParts = exercise.bodyParts || [];
+    const bodyPart = bodyParts.join(' ').toLowerCase();
+    const equipments = exercise.equipments || [];
+    const equipment = equipments.join(' ').toLowerCase();
+    const name = exercise.name?.toLowerCase() || '';
     
     // Cardio exercises
-    if (bodyPart === 'cardio' || name.includes('running') || name.includes('cycling') || 
+    if (bodyPart.includes('cardio') || name.includes('running') || name.includes('cycling') || 
         name.includes('jumping') || equipment.includes('treadmill') || equipment.includes('bike')) {
       return 'cardio';
     }
     
     // Flexibility exercises
-    if (name.includes('stretch') || name.includes('yoga') || equipment.includes('rope')) {
+    if (name.includes('stretch') || name.includes('yoga') || equipment.includes('roller')) {
       return 'flexibility';
     }
     
@@ -344,19 +233,87 @@ export class ExerciseService {
     return 'strength';
   }
 
-  // Get available body parts
-  static getBodyParts(): string[] {
-    return [
-      'back',
-      'cardio',
-      'chest',
-      'lower arms',
-      'lower legs',
-      'neck',
-      'shoulders',
-      'upper arms',
-      'upper legs',
-      'waist'
-    ];
+  // Get available body parts from API
+  static async getBodyParts(): Promise<string[]> {
+    try {
+      const response = await fetch(
+        `${BASE_URL}/api/v1/bodyparts`,
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const apiResponse: BodyPartAPIResponse = await response.json();
+      
+      if (!apiResponse.success) {
+        throw new Error('API request failed');
+      }
+
+      return apiResponse.data.map(bodyPart => bodyPart.name).sort();
+    } catch (error) {
+      // Return default body parts if API fails
+      return [
+        'back',
+        'cardio',
+        'chest',
+        'lower arms',
+        'lower legs',
+        'neck',
+        'shoulders',
+        'upper arms',
+        'upper legs',
+        'waist'
+      ];
+    }
+  }
+
+  // New method: Search exercises with body part filter
+  static async searchExercisesWithBodyPart(query: string, bodyPart?: string, limit: number = 50): Promise<ExerciseAPIResponse[]> {
+    try {
+      let url = `${BASE_URL}/api/v1/exercises?limit=${limit}`;
+      
+      if (query) {
+        url += `&search=${encodeURIComponent(query)}`;
+      }
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const apiResponse: ExerciseDBAPIResponse = await response.json();
+      
+      if (!apiResponse.success) {
+        throw new Error('API request failed');
+      }
+
+      let exercises = apiResponse.data.exercises;
+
+      // Filter by body part if specified
+      if (bodyPart) {
+        exercises = exercises.filter(exercise =>
+          exercise.bodyParts.some(part => 
+            part.toLowerCase().includes(bodyPart.toLowerCase())
+          )
+        );
+      }
+
+      return exercises.map(exercise => this.convertToLegacyFormat(exercise));
+    } catch (error) {
+      throw new Error(`Failed to search exercises: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 }
