@@ -22,9 +22,10 @@ export default {
       firebaseMessagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
       firebaseAppId: process.env.FIREBASE_APP_ID,
       eas: {
-        projectId: "e586b2fa-bf5e-4e5b-a3e7-e2ea8907ca51",
+        projectId: "dcaa5441-9dfc-4418-9a79-3d2ed96435ed",
       },
     },
+    owner: "ibtesam121",
     ios: {
       supportsTablet: true,
     },
