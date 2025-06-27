@@ -31,7 +31,6 @@ export default {
     },
     android: {
       package: "com.fittrack.app",
-      versionCode: 1,
       adaptiveIcon: {
         foregroundImage: "./assets/icon.png",
         backgroundColor: "#ffffff",
