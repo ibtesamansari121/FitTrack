@@ -21,7 +21,6 @@ export default {
       firebaseStorageBucket: process.env.FIREBASE_STORAGE_BUCKET,
       firebaseMessagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
       firebaseAppId: process.env.FIREBASE_APP_ID,
-      rapidApiKey: process.env.RAPID_API_KEY,
       eas: {
         projectId: "e586b2fa-bf5e-4e5b-a3e7-e2ea8907ca51",
       },

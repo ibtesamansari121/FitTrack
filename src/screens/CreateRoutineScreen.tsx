@@ -18,7 +18,7 @@ import { RouteProp } from '@react-navigation/native';
 import { CustomInput } from '../components/CustomInput';
 import ExerciseCard from '../components/ExerciseCard';
 import AnimatedGif from '../components/AnimatedGif';
-import { ExerciseService } from '../services/exerciseService';
+import { useExerciseStore, Exercise as LocalExercise } from '../store/exerciseStore';
 import { useRoutineStore } from '../store/routineStore';
 import { useAuthStore } from '../store/authStore';
 import { Exercise } from '../types/routine';
@@ -40,26 +40,42 @@ const { width } = Dimensions.get('window');
 const CreateRoutineScreen = ({ navigation, route }: Props) => {
   const [routineName, setRoutineName] = useState('');
   const [selectedDays, setSelectedDays] = useState<string[]>([]);
-  const [bodyParts, setBodyParts] = useState<string[]>([]);
   const [selectedBodyPart, setSelectedBodyPart] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchMode, setIsSearchMode] = useState(false);
-  const [exercises, setExercises] = useState<any[]>([]);
+  const [exercises, setExercises] = useState<LocalExercise[]>([]);
   const [selectedExercises, setSelectedExercises] = useState<Exercise[]>([]);
   const [isLoadingExercises, setIsLoadingExercises] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMoreExercises, setHasMoreExercises] = useState(true);
   const [currentOffset, setCurrentOffset] = useState(0);
+  const [hasMoreExercises, setHasMoreExercises] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
-  const [selectedExerciseInfo, setSelectedExerciseInfo] = useState<any>(null);
+  const [selectedExerciseInfo, setSelectedExerciseInfo] = useState<LocalExercise | null>(null);
   const [showExerciseModal, setShowExerciseModal] = useState(false);
 
   const { user } = useAuthStore();
   const { createRoutine, updateRoutine } = useRoutineStore();
+  const { 
+    getExercisesByBodyPart, 
+    searchExercises, 
+    getPaginatedExercises, 
+    getBodyParts,
+    initializeFuzzySearch
+  } = useExerciseStore();
+
+  // Available body parts from exercise store
+  const bodyParts = getBodyParts();
+  
+  const ITEMS_PER_PAGE = 20;
 
   // Get routine data for editing
   const editingRoutine = route.params?.routine;
   const isEditing = !!editingRoutine;
+
+  // Initialize fuzzy search on mount
+  useEffect(() => {
+    initializeFuzzySearch();
+  }, [initializeFuzzySearch]);
 
   // Initialize form data for editing
   useEffect(() => {
@@ -75,37 +91,14 @@ const CreateRoutineScreen = ({ navigation, route }: Props) => {
 
       setSelectedExercises(editingRoutine.exercises || []);
     }
+
+    // Set first body part as default
+    if (bodyParts.length > 0 && !selectedBodyPart) {
+      setSelectedBodyPart(bodyParts[0]);
+    }
   }, [isEditing, editingRoutine]);
 
-  // Load body parts from API
   useEffect(() => {
-    const loadBodyParts = async () => {
-      try {
-        const parts = await ExerciseService.getBodyParts();
-        setBodyParts(parts);
-        // Set first body part as default if not set
-        if (parts.length > 0 && !selectedBodyPart) {
-          setSelectedBodyPart(parts[0]);
-        }
-      } catch (error) {
-        console.error('Error loading body parts:', error);
-        // Use fallback body parts
-        const fallbackParts = [
-          'back', 'cardio', 'chest', 'lower arms', 'lower legs',
-          'neck', 'shoulders', 'upper arms', 'upper legs', 'waist'
-        ];
-        setBodyParts(fallbackParts);
-        if (!selectedBodyPart) {
-          setSelectedBodyPart(fallbackParts[0]);
-        }
-      }
-    };
-
-    loadBodyParts();
-  }, []);
-
-  useEffect(() => {
-    console.log('selectedBodyPart effect triggered:', selectedBodyPart);
     if (selectedBodyPart) {
       loadExercises(true);
     }
@@ -113,27 +106,38 @@ const CreateRoutineScreen = ({ navigation, route }: Props) => {
 
   // Handle search with debouncing
   useEffect(() => {
-    console.log('search effect triggered:', { searchQuery, selectedBodyPart, isSearchMode });
     // Don't run on initial mount when selectedBodyPart is not set yet
     if (!selectedBodyPart) return;
     
+    // eslint-disable-next-line no-undef
     const timeoutId = setTimeout(() => {
       if (searchQuery.trim().length >= 2) {
-        console.log('Switching to search mode');
         setIsSearchMode(true);
         loadSearchResults(true);
       } else if (searchQuery.trim().length === 0 && isSearchMode) {
         // Only reset to body part view if we were previously in search mode
-        console.log('Switching back to body part mode');
         setIsSearchMode(false);
         loadExercises(true);
       }
     }, 300);
 
+    // eslint-disable-next-line no-undef
     return () => clearTimeout(timeoutId);
   }, [searchQuery, selectedBodyPart, isSearchMode]);
 
-  const loadSearchResults = async (reset: boolean = false) => {
+  // Search exercises locally using store
+  const searchExercisesLocally = (query: string, limit: number, offset: number): LocalExercise[] => {
+    const results = searchExercises(query);
+    return getPaginatedExercises(results, limit, offset);
+  };
+
+  // Get exercises by body part locally using store
+  const getExercisesByBodyPartLocally = (bodyPart: string, limit: number, offset: number): LocalExercise[] => {
+    const results = getExercisesByBodyPart(bodyPart);
+    return getPaginatedExercises(results, limit, offset);
+  };
+
+  const loadSearchResults = (reset: boolean = false) => {
     if (reset) {
       setExercises([]);
       setCurrentOffset(0);
@@ -142,29 +146,30 @@ const CreateRoutineScreen = ({ navigation, route }: Props) => {
 
     setIsLoadingExercises(true);
 
-    try {
-      const offset = reset ? 0 : currentOffset;
-      const results = await ExerciseService.searchExercises(searchQuery.trim(), 20, offset);
+    // Simulate async operation for smooth UX
+    // eslint-disable-next-line no-undef
+    setTimeout(() => {
+      try {
+        const offset = reset ? 0 : currentOffset;
+        const results = searchExercisesLocally(searchQuery.trim(), ITEMS_PER_PAGE, offset);
 
-      if (reset) {
-        setExercises(results);
-      } else {
-        setExercises(prev => [...prev, ...results]);
+        if (reset) {
+          setExercises(results);
+        } else {
+          setExercises(prev => [...prev, ...results]);
+        }
+
+        setHasMoreExercises(results.length === ITEMS_PER_PAGE);
+        setCurrentOffset(offset + results.length);
+      } catch (error) {
+        Alert.alert('Error', 'Failed to search exercises. Please try again.');
+      } finally {
+        setIsLoadingExercises(false);
       }
-
-      setHasMoreExercises(results.length === 20);
-      setCurrentOffset(offset + results.length);
-    } catch (error) {
-      console.error('Error searching exercises:', error);
-      Alert.alert('Error', 'Failed to search exercises. Please try again.');
-    } finally {
-      setIsLoadingExercises(false);
-    }
+    }, 100);
   };
 
-  const loadExercises = async (reset: boolean = false) => {
-    console.log('loadExercises called with reset:', reset, 'selectedBodyPart:', selectedBodyPart);
-    
+  const loadExercises = (reset: boolean = false) => {
     if (reset) {
       setExercises([]);
       setCurrentOffset(0);
@@ -172,61 +177,64 @@ const CreateRoutineScreen = ({ navigation, route }: Props) => {
     }
 
     if (!selectedBodyPart) {
-      console.log('No selectedBodyPart, returning early');
       return;
     }
 
     setIsLoadingExercises(true);
 
-    try {
-      // Use new ExerciseService with body part filtering
-      console.log('Loading exercises for body part:', selectedBodyPart);
-      const offset = reset ? 0 : currentOffset;
-      const results = await ExerciseService.getExercisesByBodyPart(selectedBodyPart, 20, offset);
-      console.log('Loaded exercises:', results.length);
+    // Simulate async operation for smooth UX
+    // eslint-disable-next-line no-undef
+    setTimeout(() => {
+      try {
+        const offset = reset ? 0 : currentOffset;
+        const results = getExercisesByBodyPartLocally(selectedBodyPart, ITEMS_PER_PAGE, offset);
 
-      if (reset) {
-        setExercises(results);
-      } else {
-        setExercises(prev => [...prev, ...results]);
+        if (reset) {
+          setExercises(results);
+        } else {
+          setExercises(prev => [...prev, ...results]);
+        }
+
+        setHasMoreExercises(results.length === ITEMS_PER_PAGE);
+        setCurrentOffset(offset + results.length);
+      } catch (error) {
+        Alert.alert('Error', 'Failed to load exercises. Please try again.');
+      } finally {
+        setIsLoadingExercises(false);
       }
-
-      setHasMoreExercises(results.length === 20);
-      setCurrentOffset(offset + results.length);
-    } catch (error) {
-      console.error('Error loading exercises:', error);
-      Alert.alert('Error', 'Failed to load exercises. Please try again.');
-    } finally {
-      setIsLoadingExercises(false);
-    }
+    }, 100);
   };
 
-  const loadMoreExercises = async () => {
+  const loadMoreExercises = () => {
     if (!hasMoreExercises || isLoadingMore) {
       return;
     }
 
     setIsLoadingMore(true);
-    try {
-      if (isSearchMode && searchQuery.trim().length >= 2) {
-        // Load more search results
-        const results = await ExerciseService.searchExercises(searchQuery.trim(), 20, currentOffset);
+    
+    // Simulate async operation for smooth UX
+    // eslint-disable-next-line no-undef
+    setTimeout(() => {
+      try {
+        let results: LocalExercise[] = [];
+        
+        if (isSearchMode && searchQuery.trim().length >= 2) {
+          // Load more search results
+          results = searchExercisesLocally(searchQuery.trim(), ITEMS_PER_PAGE, currentOffset);
+        } else {
+          // Load more exercises by body part
+          results = getExercisesByBodyPartLocally(selectedBodyPart, ITEMS_PER_PAGE, currentOffset);
+        }
+        
         setExercises(prev => [...prev, ...results]);
-        setHasMoreExercises(results.length === 20);
+        setHasMoreExercises(results.length === ITEMS_PER_PAGE);
         setCurrentOffset(prev => prev + results.length);
-      } else {
-        // Load more exercises by body part
-        const results = await ExerciseService.getExercisesByBodyPart(selectedBodyPart, 20, currentOffset);
-        setExercises(prev => [...prev, ...results]);
-        setHasMoreExercises(results.length === 20);
-        setCurrentOffset(prev => prev + results.length);
+      } catch (error) {
+        Alert.alert('Error', 'Failed to load more exercises. Please try again.');
+      } finally {
+        setIsLoadingMore(false);
       }
-    } catch (error) {
-      console.error('Error loading more exercises:', error);
-      Alert.alert('Error', 'Failed to load more exercises. Please try again.');
-    } finally {
-      setIsLoadingMore(false);
-    }
+    }, 100);
   };
 
   const toggleDay = (day: string) => {
@@ -237,9 +245,8 @@ const CreateRoutineScreen = ({ navigation, route }: Props) => {
     );
   };
 
-  const toggleExercise = (exercise: any) => {
-    // Use exerciseId as primary identifier, fallback to id for compatibility
-    const exerciseIdentifier = exercise.exerciseId || exercise.id;
+  const toggleExercise = (exercise: LocalExercise) => {
+    const exerciseIdentifier = exercise.id;
     const isSelected = selectedExercises.some(e => e.id === exerciseIdentifier);
 
     if (isSelected) {
@@ -502,9 +509,9 @@ const CreateRoutineScreen = ({ navigation, route }: Props) => {
               <>
                 {exercises.map((exercise) => (
                   <ExerciseCard
-                    key={exercise.exerciseId || exercise.id}
-                    exercise={exercise}
-                    isSelected={selectedExercises.some(e => e.id === (exercise.exerciseId || exercise.id))}
+                    key={exercise.id}
+                    exercise={exercise as any}
+                    isSelected={selectedExercises.some(e => e.id === exercise.id)}
                     onToggle={() => toggleExercise(exercise)}
                     onShowInfo={() => showExerciseInfo(exercise)}
                   />

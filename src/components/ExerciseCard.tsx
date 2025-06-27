@@ -8,11 +8,11 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { ExerciseAPIResponse } from '../services/firestoreExerciseService';
+import { Exercise } from '../store/exerciseStore';
 import AnimatedGif from './AnimatedGif';
 
 interface ExerciseCardProps {
-  exercise: ExerciseAPIResponse;
+  exercise: Exercise;
   isSelected: boolean;
   onToggle: () => void;
   onShowInfo?: () => void;
