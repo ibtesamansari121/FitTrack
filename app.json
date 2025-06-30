@@ -9,7 +9,7 @@
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash.png",
-      "resizeMode": "contain",
+      "resizeMode": "fill",
       "backgroundColor": "#ffffff"
     },
     "ios": {
@@ -20,7 +20,8 @@
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "allowScreenshots": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
